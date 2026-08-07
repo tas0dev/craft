@@ -59,50 +59,84 @@ static char *artifact_path(const Manifest *manifest, const char *project_root) {
 		return NULL;
 	}
 
-	char *artifact_root = path_join(target_path, ".");
+	char *artifact_name = NULL;
 
-	free(target_path);
-
-	if (!artifact_root) return NULL;
-
-	if (!create_directory(artifact_root)) {
-		fprintf(stderr, "Failed to create artifact directory: %s\n",
-			artifact_root);
-
-		free(artifact_root);
-		return NULL;
-	}
-
+	switch (manifest->target_type) {
+	case Executable:
 #ifdef _WIN32
-	const size_t name_length = strlen(manifest->name) + strlen(".exe") + 1;
+	{
+		const size_t length =
+				strlen(manifest->name) + strlen(".exe") + 1;
 
-	char *artifact_name = malloc(name_length);
+		artifact_name = malloc(length);
 
-	if (!artifact_name) {
-		fprintf(stderr, "Failed to allocate artifact name\n");
-
-		free(artifact_root);
-		return NULL;
+			if (artifact_name) {
+			snprintf(artifact_name, length, "%s.exe",
+					 manifest->name);
+			}
 	}
-
-	snprintf(artifact_name, name_length, "%s.exe", manifest->name);
 #else
-	char *artifact_name = malloc(strlen(manifest->name) + 1);
+		artifact_name = malloc(strlen(manifest->name) + 1);
+
+		if (artifact_name) strcpy(artifact_name, manifest->name);
+#endif
+	break;
+
+	case StaticLibrary: {
+		const size_t length = strlen("lib") + strlen(manifest->name) +
+				      strlen(".a") + 1;
+
+		artifact_name = malloc(length);
+
+		if (artifact_name) {
+			snprintf(artifact_name, length, "lib%s.a",
+				 manifest->name);
+		}
+	} break;
+
+	case DynamicLibrary:
+#ifdef _WIN32
+	{
+		const size_t length =
+			strlen(manifest->name) + strlen(".dll") + 1;
+
+		artifact_name = malloc(length);
+
+		if (artifact_name) {
+			snprintf(artifact_name, length, "%s.dll",
+				 manifest->name);
+		}
+	}
+#else
+	{
+		const size_t length = strlen("lib") + strlen(manifest->name) +
+				      strlen(".so") + 1;
+
+		artifact_name = malloc(length);
+
+		if (artifact_name) {
+			snprintf(artifact_name,
+					length,
+					"lib%s.so",
+					manifest->name
+				);
+			}
+		}
+#endif
+		break;
+	}
 
 	if (!artifact_name) {
 		fprintf(stderr, "Failed to allocate artifact name\n");
 
-		free(artifact_root);
+		free(target_path);
 		return NULL;
 	}
 
-	strcpy(artifact_name, manifest->name);
-#endif
-
-	char *path = path_join(artifact_root, artifact_name);
+	char *path = path_join(target_path, artifact_name);
 
 	free(artifact_name);
-	free(artifact_root);
+	free(target_path);
 
 	return path;
 }
@@ -123,67 +157,96 @@ static char *command_path_from_artifact(const char *artifact) {
 	return path;
 }
 
-static char *build_link_command(const Manifest *manifest,
-				const ObjectList *objects,
-				const char *artifact,
-				const char *project_root) {
-	size_t length =
-		strlen(manifest->ld) + strlen(" -o ") + strlen(artifact);
+static char *build_link_command(
+	const Manifest *manifest,
+	const ObjectList *objects,
+	const char *artifact,
+	const char *project_root
+) {
+	const char *program =
+		manifest->target_type ==
+			StaticLibrary ? "ar" : manifest->ld;
+
+	size_t length = strlen(program);
+
+	if (manifest->target_type == StaticLibrary) {
+		length += strlen(" rcs ");
+		length += strlen(artifact);
+	} else {
+		if (manifest->target_type == DynamicLibrary
+		) {
+			length += strlen(" -shared");
+		}
+
+		for (size_t i = 0; i < manifest->ldflags_count; i++) {
+			length += 1;
+			length += strlen(manifest->ldflags[i]);
+		}
+
+		if (manifest->linker_script) {
+			length += strlen(" -T ");
+			length += strlen(project_root);
+			length += 1;
+			length += strlen(manifest->linker_script);
+		}
+	}
 
 	for (size_t i = 0; i < objects->count; i++) {
-		length += 1 + strlen(objects->files[i]);
+		length +=
+			1 +
+			strlen(objects->files[i]);
 	}
 
-	for (size_t i = 0; i < manifest->ldflags_count; i++) {
-		length += 1 + strlen(manifest->ldflags[i]);
-	}
-
-	if (manifest->linker_script) {
-		length += strlen(" -T ");
-		length += strlen(project_root);
-		length += 1;
-		length += strlen(manifest->linker_script);
+	if (manifest->target_type != StaticLibrary) {
+		length += strlen(" -o ");
+		length += strlen(artifact);
 	}
 
 	char *command = malloc(length + 1);
 
 	if (!command) {
-		fprintf(stderr,
-			"Failed to allocate linker command\n");
+		fprintf(stderr, "Failed to allocate linker command\n");
 
 		return NULL;
 	}
 
 	command[0] = '\0';
 
-	strcat(
-		command,
-		manifest->ld
-	);
+	strcat(command, program);
 
-	for (
-		size_t i = 0; i < objects->count; i++) {
+	if (manifest->target_type == StaticLibrary) {
+		strcat(command, " rcs ");
+		strcat(command, artifact);
+	} else if (manifest->target_type ==
+		DynamicLibrary) {
+		strcat(command, " -shared");
+	}
+
+	for (size_t i = 0; i < objects->count;
+		i++
+	) {
 		strcat(command, " ");
-		strcat(command,
-			objects->files[i]
-		);
+		strcat(command, objects->files[i]);
 	}
 
-	for (
-		size_t i = 0; i < manifest->ldflags_count; i++) {
-		strcat(command, " ");
-		strcat(command, manifest->ldflags[i]);
-	}
+	if (manifest->target_type != StaticLibrary) {
+		for (size_t i = 0; i < manifest->ldflags_count; i++) {
+			strcat(command, " ");
+			strcat(command, manifest->ldflags[i]
+			);
+		}
 
-	if (manifest->linker_script) {
-		strcat(command, " -T ");
-		strcat(command, project_root);
-		strcat(command, "/");
-		strcat(command, manifest->linker_script);
-	}
+		if (manifest->linker_script) {
+			strcat(command, " -T ");
+			strcat(command, project_root);
+			strcat(command, "/");
+			strcat(
+				command, manifest->linker_script);
+		}
 
-	strcat(command, " -o ");
-	strcat(command, artifact);
+		strcat(command, " -o ");
+		strcat(command, artifact);
+	}
 
 	return command;
 }
@@ -290,19 +353,71 @@ static int link_artifact(
 	const Manifest *manifest,
 	const ObjectList *objects,
 	const char *artifact,
-	const char *project_root) {
+	const char *project_root
+) {
+	if (
+		manifest->target_type ==
+		StaticLibrary
+	) {
+		const size_t argument_count =
+			3 +
+			objects->count +
+			1;
+
+		const char **argv =
+			calloc(
+				argument_count,
+				sizeof(char *)
+			);
+
+		if (!argv) {
+			fprintf(
+				stderr,
+				"Failed to allocate archiver arguments\n"
+			);
+
+			return -1;
+		}
+
+		size_t index = 0;
+
+		argv[index++] = "ar";
+		argv[index++] = "rcs";
+		argv[index++] = artifact;
+
+		for (size_t i = 0; i < objects->count; i++) {
+			argv[index++] = objects->files[i];
+		}
+
+		argv[index] = NULL;
+
+		const int result = process_run("ar", argv);
+
+		free(argv);
+
+		return result;
+	}
+
 	const size_t linker_script_argument_count =
 		manifest->linker_script ? 2 : 0;
 
-	const size_t argument_count = 1 + objects->count +
-				      manifest->ldflags_count +
-				      linker_script_argument_count + 2 + 1;
+	const size_t dynamic_argument_count =
+		manifest->target_type == DynamicLibrary ? 1 : 0;
 
-	const char **argv = calloc(argument_count, sizeof(char *));
+	const size_t argument_count =
+		1 + objects->count + manifest->ldflags_count +
+		linker_script_argument_count + dynamic_argument_count + 2 + 1;
+
+	const char **argv =
+		calloc(
+			argument_count,
+			sizeof(char *)
+		);
 
 	if (!argv) {
-		fprintf(stderr, "Failed to allocate linker arguments\n"
-		);
+		fprintf(
+			stderr,
+			"Failed to allocate linker arguments\n");
 
 		return -1;
 	}
@@ -323,15 +438,22 @@ static int link_artifact(
 
 	argv[index++] = manifest->ld;
 
+	if (manifest->target_type == DynamicLibrary
+	) {
+		argv[index++] = "-shared";
+	}
+
 	for (size_t i = 0; i < objects->count;
 		i++
 	) {
-		argv[index++] = objects->files[i];
+		argv[index++] =
+			objects->files[i];
 	}
 
 	for (
 		size_t i = 0;
-		i < manifest->ldflags_count; i++) {
+		i < manifest->ldflags_count;
+		i++) {
 		argv[index++] = manifest->ldflags[i];
 	}
 
@@ -344,10 +466,7 @@ static int link_artifact(
 	argv[index++] = artifact;
 	argv[index] = NULL;
 
-	const int result = process_run(
-			manifest->ld,
-			argv
-		);
+	const int result = process_run(manifest->ld, argv);
 
 	free(linker_script_path);
 	free(argv);

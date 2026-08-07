@@ -26,7 +26,10 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 
 	char *manifest_file = malloc(length);
 
-	if (!manifest_file) return NULL;
+	if (!manifest_file) {
+		fprintf(stderr, "Failed to allocate manifest path\n");
+		return NULL;
+	}
 
 	snprintf(manifest_file, length, "%s/%s", path, MANIFEST_FILE);
 
@@ -60,6 +63,7 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 	Manifest *manifest = calloc(1, sizeof(*manifest));
 
 	if (!manifest) {
+		fprintf(stderr, "Failed to allocate manifest\n");
 		toml_free(document);
 		return NULL;
 	}
@@ -68,6 +72,7 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 		malloc(strlen(name) + 1);
 
 	if (!manifest->name) {
+		fprintf(stderr, "Failed to allocate project name\n");
 		manifest_free(manifest);
 		toml_free(document);
 		return NULL;
@@ -75,14 +80,39 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 
 	strcpy(manifest->name, name);
 
-	const char *cc =
-		toml_get_string(document, "toolchain.cc");
+	const char *target_type = toml_get_string(document, "target.type");
 
-	if (!cc) cc = "cc";
+	if (!target_type) {
+		manifest->target_type = Executable;
+	} else if (strcmp(target_type, "executable") == 0) {
+		manifest->target_type = Executable;
+	} else if (strcmp(target_type, "staticlib") == 0) {
+		manifest->target_type = StaticLibrary;
+	} else if (strcmp(target_type, "dynlib") == 0) {
+		manifest->target_type = DynamicLibrary;
+	} else {
+		if (error) {
+			error->line = 0;
+			error->column = 0;
+			error->message = "target.type must be executable, "
+					 "staticlib or dynlib";
+		}
 
-	manifest->cc = malloc(strlen(cc) + 1);
+		manifest_free(manifest);
+		toml_free(document);
+		return NULL;
+	}
+
+	const char *cc = toml_get_string(document, "toolchain.cc");
+
+	if (!cc)
+		cc = "cc";
+
+	manifest->cc =
+		malloc(strlen(cc) + 1);
 
 	if (!manifest->cc) {
+		fprintf(stderr, "Failed to allocate compiler name\n");
 		manifest_free(manifest);
 		toml_free(document);
 		return NULL;
@@ -93,12 +123,14 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 	const char *ld =
 		toml_get_string(document, "toolchain.ld");
 
-	if (!ld) ld = "cc";
+	if (!ld)
+		ld = "cc";
 
 	manifest->ld =
 		malloc(strlen(ld) + 1);
 
 	if (!manifest->ld) {
+		fprintf(stderr, "Failed to allocate linker name\n");
 		manifest_free(manifest);
 		toml_free(document);
 		return NULL;
@@ -109,16 +141,18 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 	const TomlArray *source_dirs =
 		toml_get_array(
 			document,
-			"target.source_dirs");
+			"target.source_dirs"
+		);
 
 	if (source_dirs) {
 		manifest->source_dir_count =
 			toml_array_length(source_dirs);
 
-		manifest->source_dirs =
-			calloc(manifest->source_dir_count, sizeof(char *));
+		manifest->source_dirs = calloc(
+			manifest->source_dir_count, sizeof(char *));
 
 		if (!manifest->source_dirs) {
+			fprintf(stderr, "Failed to allocate source directories\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
@@ -126,7 +160,9 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 
 		for (
 			size_t i = 0;
-			i < manifest->source_dir_count; i++) {
+			i < manifest->source_dir_count;
+			i++
+		) {
 			const TomlValue *value = toml_array_get(source_dirs, i);
 
 			const char *source_dir = toml_string(value);
@@ -148,6 +184,7 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 				malloc(strlen(source_dir) + 1);
 
 			if (!manifest->source_dirs[i]) {
+				fprintf(stderr, "Failed to allocate source directory\n");
 				manifest_free(manifest);
 				toml_free(document);
 				return NULL;
@@ -161,9 +198,12 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 	} else {
 		manifest->source_dir_count = 1;
 
-		manifest->source_dirs = calloc(1, sizeof(char *));
+		manifest->source_dirs =
+			calloc(1, sizeof(char *));
 
 		if (!manifest->source_dirs) {
+			fprintf(stderr,
+				"Failed to allocate source directories\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
@@ -173,6 +213,8 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 			malloc(sizeof("src"));
 
 		if (!manifest->source_dirs[0]) {
+			fprintf(stderr, "Failed to allocate default source "
+					"directory\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
@@ -185,16 +227,20 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 	}
 
 	const TomlArray *include_dirs =
-		toml_get_array(document, "target.include_dirs"
-		);
+		toml_get_array(
+			document,
+			"target.include_dirs");
 
 	if (include_dirs) {
-		manifest->include_dir_count = toml_array_length(include_dirs);
+		manifest->include_dir_count =
+			toml_array_length(include_dirs);
 
 		manifest->include_dirs =
 			calloc(manifest->include_dir_count, sizeof(char *));
 
 		if (!manifest->include_dirs) {
+			fprintf(stderr,
+				"Failed to allocate include directories\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
@@ -208,7 +254,8 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 			const TomlValue *value =
 				toml_array_get(include_dirs, i);
 
-			const char *include_dir = toml_string(value);
+			const char *include_dir =
+				toml_string(value);
 
 			if (!include_dir) {
 				if (error) {
@@ -227,6 +274,8 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 				malloc(strlen(include_dir) + 1);
 
 			if (!manifest->include_dirs[i]) {
+				fprintf(stderr, "Failed to allocate include "
+						"directory\n");
 				manifest_free(manifest);
 				toml_free(document);
 				return NULL;
@@ -240,9 +289,11 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 	} else {
 		manifest->include_dir_count = 2;
 
-		manifest->include_dirs = calloc(2, sizeof(char *));
+		manifest->include_dirs =
+			calloc(2, sizeof(char *));
 
 		if (!manifest->include_dirs) {
+			fprintf(stderr, "Failed to allocate include directories\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
@@ -254,51 +305,56 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 		manifest->include_dirs[1] =
 			malloc(sizeof("include"));
 
-		if (!manifest->include_dirs[0] || !manifest->include_dirs[1]) {
+		if (
+			!manifest->include_dirs[0] ||
+			!manifest->include_dirs[1]) {
+			fprintf(stderr, "Failed to allocate default include "
+					"directories\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
 		}
 
-		strcpy(manifest->include_dirs[0], "src"
-		);
-
 		strcpy(
-			manifest->include_dirs[1],
+			manifest->include_dirs[0],
+			"src");
+
+		strcpy(manifest->include_dirs[1],
 			"include"
 		);
 	}
 
-	const TomlArray *cflags = toml_get_array(document,
-			"target.cflags");
+	const TomlArray *cflags =
+		toml_get_array(document, "target.cflags");
 
 	if (cflags) {
-		manifest->cflags_count =
-			toml_array_length(cflags);
+		manifest->cflags_count = toml_array_length(cflags);
 
-		manifest->cflags =
-			calloc(manifest->cflags_count,
-			sizeof(char *));
+		manifest->cflags = calloc(
+			manifest->cflags_count, sizeof(char *));
 
 		if (!manifest->cflags) {
+			fprintf(stderr, "Failed to allocate cflags\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
 		}
 
-		for (size_t i = 0; i < manifest->cflags_count;
-			i++
-		) {
-			const TomlValue *value =
-				toml_array_get(cflags, i);
+		for (
+			size_t i = 0;
+			i < manifest->cflags_count;
+			i++) {
+			const TomlValue *value = toml_array_get(cflags, i);
 
-			const char *cflag = toml_string(value);
+			const char *cflag =
+				toml_string(value);
 
 			if (!cflag) {
 				if (error) {
 					error->line = 0;
 					error->column = 0;
-					error->message = "target.cflags must "
+					error->message =
+						"target.cflags must "
 							 "contain strings";
 				}
 
@@ -307,25 +363,24 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 				return NULL;
 			}
 
-			manifest->cflags[i] = malloc(strlen(cflag) + 1);
+			manifest->cflags[i] =
+				malloc(strlen(cflag) + 1);
 
 			if (!manifest->cflags[i]) {
+				fprintf(stderr, "Failed to allocate cflag\n");
 				manifest_free(manifest);
 				toml_free(document);
 				return NULL;
 			}
 
-			strcpy(manifest->cflags[i],
+			strcpy(
+				manifest->cflags[i],
 				cflag
 			);
 		}
 	}
 
-	const TomlArray *ldflags =
-		toml_get_array(
-			document,
-			"target.ldflags"
-		);
+	const TomlArray *ldflags = toml_get_array(document, "target.ldflags");
 
 	if (ldflags) {
 		manifest->ldflags_count = toml_array_length(ldflags);
@@ -334,12 +389,17 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 			calloc(manifest->ldflags_count, sizeof(char *));
 
 		if (!manifest->ldflags) {
+			fprintf(stderr, "Failed to allocate ldflags\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
 		}
 
-		for (size_t i = 0; i < manifest->ldflags_count; i++) {
+		for (
+			size_t i = 0;
+			i < manifest->ldflags_count;
+			i++
+		) {
 			const TomlValue *value = toml_array_get(ldflags, i);
 
 			const char *ldflag = toml_string(value);
@@ -348,8 +408,8 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 				if (error) {
 					error->line = 0;
 					error->column = 0;
-					error->message = "target.ldflags must "
-							 "contain strings";
+					error->message =
+						"target.ldflags must contain strings";
 				}
 
 				manifest_free(manifest);
@@ -357,31 +417,40 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 				return NULL;
 			}
 
-			manifest->ldflags[i] = malloc(strlen(ldflag) + 1);
+			manifest->ldflags[i] =
+				malloc(strlen(ldflag) + 1);
 
 			if (!manifest->ldflags[i]) {
+				fprintf(stderr, "Failed to allocate ldflag\n");
 				manifest_free(manifest);
 				toml_free(document);
 				return NULL;
 			}
 
-			strcpy(manifest->ldflags[i], ldflag);
+			strcpy(
+				manifest->ldflags[i],
+				ldflag
+			);
 		}
 	}
 
 	const char *linker_script =
-		toml_get_string(document, "target.linker_script");
+		toml_get_string(document, "target.linker_script"
+		);
 
 	if (linker_script) {
 		manifest->linker_script = malloc(strlen(linker_script) + 1);
 
 		if (!manifest->linker_script) {
+			fprintf(stderr, "Failed to allocate linker script\n");
 			manifest_free(manifest);
 			toml_free(document);
 			return NULL;
 		}
 
-		strcpy(manifest->linker_script, linker_script);
+		strcpy(manifest->linker_script,
+			linker_script
+		);
 	}
 
 	toml_free(document);

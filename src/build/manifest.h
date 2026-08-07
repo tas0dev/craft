@@ -10,6 +10,12 @@
 #define CRAFT_MANIFEST_H
 #include <stddef.h>
 
+typedef enum {
+	Executable,
+	StaticLibrary,
+	DynamicLibrary,
+} TargetType;
+
 typedef struct {
 	char *name;
 	char *cc;
@@ -23,6 +29,7 @@ typedef struct {
 	char **ldflags;
 	size_t ldflags_count;
 	char *linker_script;
+	TargetType target_type;
 } Manifest;
 
 typedef struct {
