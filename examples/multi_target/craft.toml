@@ -1,7 +1,10 @@
 [project]
-name = "StaticLibraryTest"
+name = "MultiTargetTest"
 
 [target.app]
+dependencies = [
+    "testlib"
+]
 include_dirs = [
     "testlib"
 ]

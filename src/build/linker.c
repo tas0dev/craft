@@ -344,7 +344,8 @@ static int link_artifact(const Manifest *manifest,
 		const char **argv = calloc(argument_count, sizeof(char *));
 
 		if (!argv) {
-			fprintf(stderr,
+			fprintf(
+				stderr,
 				"Failed to allocate archiver arguments\n");
 
 			return -1;
@@ -356,35 +357,68 @@ static int link_artifact(const Manifest *manifest,
 		argv[index++] = "rcs";
 		argv[index++] = artifact;
 
-		for (size_t i = 0; i < objects->count; i++) {
+		for (
+			size_t i = 0; i < objects->count; i++) {
 			argv[index++] = objects->files[i];
 		}
 
 		argv[index] = NULL;
 
-		const int result = process_run("ar", argv);
+		const int result =
+			process_run("ar", argv);
 
 		free(argv);
 
 		return result;
 	}
 
+	char **dependency_paths =
+		calloc(
+			target->dependency_count, sizeof(char *));
+
+	if (target->dependency_count != 0 && !dependency_paths) {
+		fprintf(stderr, "Failed to allocate dependency paths\n");
+
+		return -1;
+	}
+
+	for (size_t i = 0; i < target->dependency_count; i++) {
+		BuildTarget *dependency =
+			manifest_find_target(manifest, target->dependencies[i]);
+
+		if (!dependency) {
+			fprintf(stderr, "Unknown dependency: %s\n",
+				target->dependencies[i]);
+
+			goto error;
+		}
+
+		dependency_paths[i] = artifact_path(dependency, project_root);
+
+		if (!dependency_paths[i]) goto error;
+	}
+
 	const size_t linker_script_argument_count =
 		target->linker_script ? 2 : 0;
 
 	const size_t dynamic_argument_count =
-		target->target_type == DynamicLibrary ? 1 : 0;
+		target->target_type == DynamicLibrary
+			? 1
+			: 0;
 
 	const size_t argument_count =
-		1 + objects->count + target->ldflags_count +
-		linker_script_argument_count + dynamic_argument_count + 2 + 1;
+		1 +
+		objects->count +
+		target->dependency_count +
+		target->ldflags_count + linker_script_argument_count +
+		dynamic_argument_count + 2 + 1;
 
 	const char **argv = calloc(argument_count, sizeof(char *));
 
 	if (!argv) {
 		fprintf(stderr, "Failed to allocate linker arguments\n");
 
-		return -1;
+		goto error;
 	}
 
 	char *linker_script_path = NULL;
@@ -395,7 +429,7 @@ static int link_artifact(const Manifest *manifest,
 
 		if (!linker_script_path) {
 			free(argv);
-			return -1;
+			goto error;
 		}
 	}
 
@@ -405,12 +439,20 @@ static int link_artifact(const Manifest *manifest,
 
 	if (target->target_type == DynamicLibrary) argv[index++] = "-shared";
 
-	for (size_t i = 0; i < objects->count; i++) {
+	for (
+		size_t i = 0; i < objects->count;
+		i++
+	) {
 		argv[index++] = objects->files[i];
 	}
 
+	for (size_t i = 0; i < target->dependency_count; i++) {
+		argv[index++] = dependency_paths[i];
+	}
+
 	for (size_t i = 0; i < target->ldflags_count; i++) {
-		argv[index++] = target->ldflags[i];
+		argv[index++] =
+			target->ldflags[i];
 	}
 
 	if (linker_script_path) {
@@ -422,12 +464,35 @@ static int link_artifact(const Manifest *manifest,
 	argv[index++] = artifact;
 	argv[index] = NULL;
 
-	const int result = process_run(manifest->ld, argv);
+	const int result = process_run(
+			manifest->ld,
+			argv
+		);
 
 	free(linker_script_path);
 	free(argv);
 
+	for (
+		size_t i = 0;
+		i < target->dependency_count;
+		i++
+	) {
+		free(dependency_paths[i]);
+	}
+
+	free(dependency_paths);
+
 	return result;
+
+error:
+	for (size_t i = 0;
+		i < target->dependency_count; i++) {
+		free(dependency_paths[i]);
+	}
+
+	free(dependency_paths);
+
+	return -1;
 }
 
 int link_objects(const Manifest *manifest,

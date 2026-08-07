@@ -64,11 +64,59 @@ static int build_target(const Manifest *manifest,
 	return 0;
 }
 
+static int build_target_recursive(const Manifest *manifest,
+				  const BuildTarget *target,
+				  const char *project_root,
+				  unsigned char *states) {
+	const size_t target_index = (size_t)(target - manifest->targets);
+
+	if (states[target_index] == 2) return 0;
+
+	if (states[target_index] == 1) {
+		fprintf(stderr,
+			RED "Circular dependency involving target: " RESET
+			    "%s\n",
+			target->name);
+
+		return 1;
+	}
+
+	states[target_index] = 1;
+
+	for (size_t i = 0; i < target->dependency_count; i++) {
+		const char *dependency_name = target->dependencies[i];
+
+		BuildTarget *dependency =
+			manifest_find_target(manifest, dependency_name);
+
+		if (!dependency) {
+			fprintf(stderr, RED "Unknown dependency: " RESET "%s\n",
+				dependency_name);
+
+			return 1;
+		}
+
+		if (build_target_recursive(manifest, dependency, project_root,
+					   states) != 0) {
+			return 1;
+		}
+	}
+
+	if (build_target(manifest, target, project_root) != 0) { return 1; }
+
+	states[target_index] = 2;
+
+	return 0;
+}
+
 int run_build(const int argc, char **argv) {
 	char cwd[4096];
 
 	if (!getcwd(cwd, sizeof(cwd))) {
-		fprintf(stderr, RED "Failed to get current directory\n" RESET);
+		fprintf(
+			stderr,
+			RED "Failed to get current directory\n" RESET
+		);
 
 		return 1;
 	}
@@ -76,19 +124,25 @@ int run_build(const int argc, char **argv) {
 	char *project_root = project_find_root(cwd);
 
 	if (!project_root) {
-		fprintf(stderr, RED "Could not find " MANIFEST_FILE "\n" RESET);
+		fprintf(
+			stderr, RED "Could not find " MANIFEST_FILE "\n" RESET
+		);
 
 		return 1;
 	}
 
 	ManifestError error = {0};
 
-	Manifest *manifest = manifest_load(project_root, &error);
+	Manifest *manifest = manifest_load(project_root,
+			&error
+		);
 
 	if (!manifest) {
 		fprintf(stderr, RED "Failed to load manifest" RESET);
 
-		if (error.message) fprintf(stderr, ": %s", error.message);
+		if (error.message)
+			fprintf(
+				stderr, ": %s", error.message);
 
 		if (error.line != 0) {
 			fprintf(stderr, " (%zu:%zu)", error.line, error.column);
@@ -100,24 +154,40 @@ int run_build(const int argc, char **argv) {
 		return 1;
 	}
 
-	if (argc >= 3) {
-		const char *target_name = argv[2];
+	unsigned char *states =
+		calloc(manifest->target_count, sizeof(unsigned char)
+		);
 
-		BuildTarget *target =
-			manifest_find_target(manifest, target_name);
+	if (!states) {
+		fprintf(
+			stderr,
+			RED "Failed to allocate build state\n" RESET);
+
+		manifest_free(manifest);
+		free(project_root);
+
+		return 1;
+	}
+
+	if (argc >= 3) {
+		BuildTarget *target = manifest_find_target(manifest, argv[2]);
 
 		if (!target) {
 			fprintf(stderr, RED "Unknown target: " RESET "%s\n",
-				target_name);
+				argv[2]
+			);
 
+			free(states);
 			manifest_free(manifest);
 			free(project_root);
 
 			return 1;
 		}
 
-		const int result = build_target(manifest, target, project_root);
+		const int result = build_target_recursive(manifest, target,
+							  project_root, states);
 
+		free(states);
 		manifest_free(manifest);
 		free(project_root);
 
@@ -125,17 +195,21 @@ int run_build(const int argc, char **argv) {
 	}
 
 	for (size_t i = 0; i < manifest->target_count; i++) {
-		const int result = build_target(manifest, &manifest->targets[i],
-						project_root);
-
-		if (result != 0) {
+		if (build_target_recursive(manifest,
+				&manifest->targets[i],
+				project_root,
+				states
+			) != 0
+		) {
+			free(states);
 			manifest_free(manifest);
 			free(project_root);
 
-			return result;
+			return 1;
 		}
 	}
 
+	free(states);
 	manifest_free(manifest);
 	free(project_root);
 

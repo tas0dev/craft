@@ -26,6 +26,8 @@ typedef struct {
 	size_t cflags_count;
 	char **ldflags;
 	size_t ldflags_count;
+	char **dependencies;
+	size_t dependency_count;
 	char *linker_script;
 	TargetType target_type;
 } BuildTarget;
