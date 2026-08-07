@@ -11,12 +11,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #ifdef _WIN32
 #include <direct.h>
 #else
 #include <errno.h>
-#include <sys/stat.h>
 #endif
 
 static char *path_join(const char *left, const char *right) {
@@ -119,12 +119,81 @@ static int object_list_add(ObjectList *objects, const char *path) {
 	return 1;
 }
 
+static char *dependency_path_from_object(const char *object_path) {
+	char *path = malloc(strlen(object_path) + 1);
+
+	if (!path) return NULL;
+
+	strcpy(path, object_path);
+
+	char *extension = strrchr(path, '.');
+
+	if (!extension) {
+		free(path);
+		return NULL;
+	}
+
+	strcpy(extension, ".d");
+
+	return path;
+}
+
+static int should_compile(const char *object_path,
+			  const char *dependency_path) {
+	struct stat object_stat;
+
+	if (stat(object_path, &object_stat) != 0) return 1;
+
+	FILE *file = fopen(dependency_path, "r");
+
+	if (!file) return 1;
+
+	char line[4096];
+	int first_token = 1;
+
+	while (fgets(line, sizeof(line), file)) {
+		char *token = strtok(line, " \t\r\n");
+
+		while (token) {
+			if (first_token) {
+				first_token = 0;
+				token = strtok(NULL, " \t\r\n");
+				continue;
+			}
+
+			if (strcmp(token, "\\") == 0) {
+				token = strtok(NULL, " \t\r\n");
+				continue;
+			}
+
+			struct stat dependency_stat;
+
+			if (stat(token, &dependency_stat) != 0) {
+				fclose(file);
+				return 1;
+			}
+
+			if (dependency_stat.st_mtime > object_stat.st_mtime) {
+				fclose(file);
+				return 1;
+			}
+
+			token = strtok(NULL, " \t\r\n");
+		}
+	}
+
+	fclose(file);
+
+	return 0;
+}
+
 static int compile_source(const Manifest *manifest,
 			  const SourceFile *source,
 			  const char *object_path,
+			  const char *dependency_path,
 			  const char *project_root) {
 	const size_t argument_count =
-		1 + manifest->include_dir_count * 2 + 4 + 1;
+		1 + manifest->include_dir_count * 2 + 8 + 1;
 
 	const char **argv = calloc(argument_count, sizeof(char *));
 
@@ -155,10 +224,16 @@ static int compile_source(const Manifest *manifest,
 		argv[argument_index++] = include_path;
 	}
 
+	argv[argument_index++] = "-MMD";
+	argv[argument_index++] = "-MF";
+	argv[argument_index++] = dependency_path;
+
 	argv[argument_index++] = "-c";
 	argv[argument_index++] = source->path;
+
 	argv[argument_index++] = "-o";
 	argv[argument_index++] = object_path;
+
 	argv[argument_index] = NULL;
 
 	printf("Compiling %s\n", source->relative_path);
@@ -203,30 +278,57 @@ ObjectList *compile_sources(const Manifest *manifest,
 			return NULL;
 		}
 
-		if (!create_parent_directories(object_path)) {
+		char *dependency_path =
+			dependency_path_from_object(object_path);
+
+		if (!dependency_path) {
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
 		}
 
-		const int result = compile_source(manifest, source, object_path,
-						  project_root);
+		if (!create_parent_directories(object_path)) {
+			free(dependency_path);
+			free(object_path);
+			object_list_free(objects);
+			return NULL;
+		}
+
+		if (!should_compile(object_path, dependency_path)) {
+			if (!object_list_add(objects, object_path)) {
+				free(dependency_path);
+				free(object_path);
+				object_list_free(objects);
+				return NULL;
+			}
+
+			free(dependency_path);
+			free(object_path);
+			continue;
+		}
+
+		const int result =
+			compile_source(manifest, source, object_path,
+				       dependency_path, project_root);
 
 		if (result != 0) {
 			fprintf(stderr, "Failed to compile %s\n",
 				source->relative_path);
 
+			free(dependency_path);
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
 		}
 
 		if (!object_list_add(objects, object_path)) {
+			free(dependency_path);
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
 		}
 
+		free(dependency_path);
 		free(object_path);
 	}
 
