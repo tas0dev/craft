@@ -12,9 +12,17 @@
 #include <stdio.h>
 
 int main(const int argc, char **argv) {
-	if (argc == 1) print_help(argc, argv);
+	if (argc == 1) {
+		print_help(argc, argv);
+		return 0;
+	}
 
-	if (match_commands(argv[1]) == Help) print_help(argc, argv);
-	if (match_commands(argv[1]) == Unknown)
-		printf(RED "Unknown command: " RESET "%s", argv[1]);
+	const enum Commands command = match_commands(argv[1]);
+
+	if (command == Help) print_help(argc, argv);
+
+	if (command == Unknown)
+		printf(RED "Unknown command: " RESET "%s\n", argv[1]);
+
+	return 0;
 }

@@ -15,6 +15,7 @@ void print_help(const int argc, char *argv[]) {
 
 	char *bin = argv[0];
 	printf(BLUE "usage: " RESET MAGENTA "%s" RESET " [" GREEN "-h" RESET
-		    "," GREEN "help" RESET "]",
+		    "," GREEN "help" RESET "]\n",
 	       bin);
+	fflush(stdout);
 }
