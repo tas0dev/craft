@@ -182,20 +182,31 @@ static char *build_compile_command(const Manifest *manifest,
 }
 
 static char *command_path_from_object(const char *object_path) {
-	char *path = malloc(strlen(object_path) + 1);
-
-	if (!path) return NULL;
-
-	strcpy(path, object_path);
-
-	char *extension = strrchr(path, '.');
+	const char *extension = strrchr(object_path, '.');
 
 	if (!extension) {
-		free(path);
+		fprintf(stderr,
+			"Failed to create command path: object path has no "
+			"extension: %s\n",
+			object_path);
 		return NULL;
 	}
 
-	strcpy(extension, ".cmd");
+	const size_t base_length = (size_t)(extension - object_path);
+
+	const size_t length = base_length + strlen(".cmd") + 1;
+
+	char *path = malloc(length);
+
+	if (!path) {
+		fprintf(stderr, "Failed to allocate command path for %s\n",
+			object_path);
+		return NULL;
+	}
+
+	memcpy(path, object_path, base_length);
+
+	strcpy(path + base_length, ".cmd");
 
 	return path;
 }
