@@ -74,6 +74,34 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 
 	strcpy(manifest->name, name);
 
+	const char *cc = toml_get_string(document, "toolchain.cc");
+
+	if (!cc) cc = "cc";
+
+	manifest->cc = malloc(strlen(cc) + 1);
+
+	if (!manifest->cc) {
+		manifest_free(manifest);
+		toml_free(document);
+		return NULL;
+	}
+
+	strcpy(manifest->cc, cc);
+
+	const char *ld = toml_get_string(document, "toolchain.ld");
+
+	if (!ld) ld = "cc";
+
+	manifest->ld = malloc(strlen(ld) + 1);
+
+	if (!manifest->ld) {
+		manifest_free(manifest);
+		toml_free(document);
+		return NULL;
+	}
+
+	strcpy(manifest->ld, ld);
+
 	const TomlArray *source_dirs =
 		toml_get_array(document, "target.source_dirs");
 
@@ -264,19 +292,24 @@ void manifest_free(Manifest *manifest) {
 	if (!manifest) return;
 
 	free(manifest->name);
+	free(manifest->cc);
+	free(manifest->ld);
 
-	for (size_t i = 0; i < manifest->source_dir_count; i++)
+	for (size_t i = 0; i < manifest->source_dir_count; i++) {
 		free(manifest->source_dirs[i]);
+	}
 
 	free(manifest->source_dirs);
 
-	for (size_t i = 0; i < manifest->include_dir_count; i++)
+	for (size_t i = 0; i < manifest->include_dir_count; i++) {
 		free(manifest->include_dirs[i]);
+	}
 
 	free(manifest->include_dirs);
 
-	for (size_t i = 0; i < manifest->cflags_count; i++)
+	for (size_t i = 0; i < manifest->cflags_count; i++) {
 		free(manifest->cflags[i]);
+	}
 
 	free(manifest->cflags);
 

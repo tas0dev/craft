@@ -128,7 +128,7 @@ static char *build_compile_command(const Manifest *manifest,
 				   const char *project_root) {
 	size_t length = 0;
 
-	length += strlen("cc");
+	length += strlen(manifest->cc);
 
 	for (size_t i = 0; i < manifest->include_dir_count; i++) {
 		length += strlen(" -I");
@@ -157,7 +157,7 @@ static char *build_compile_command(const Manifest *manifest,
 
 	command[0] = '\0';
 
-	strcat(command, "cc");
+	strcat(command, manifest->cc);
 
 	for (size_t i = 0; i < manifest->include_dir_count; i++) {
 		strcat(command, " -I");
@@ -385,7 +385,7 @@ static int compile_source(const Manifest *manifest,
 	size_t argument_index = 0;
 	size_t include_index = 0;
 
-	argv[argument_index++] = "cc";
+	argv[argument_index++] = manifest->cc;
 
 	for (size_t i = 0; i < manifest->include_dir_count; i++) {
 		char *include_path =
@@ -424,7 +424,7 @@ static int compile_source(const Manifest *manifest,
 
 	printf(GREEN "Compiling" RESET "\t%s\n", source->relative_path);
 
-	const int result = process_run("cc", argv);
+	const int result = process_run(manifest->cc, argv);
 
 	for (size_t i = 0; i < include_index; i++) {
 		free(include_paths[i]);

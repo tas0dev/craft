@@ -12,6 +12,8 @@
 
 typedef struct {
 	char *name;
+	char *cc;
+	char *ld;
 	char **source_dirs;
 	size_t source_dir_count;
 	char **include_dirs;

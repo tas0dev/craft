@@ -123,9 +123,11 @@ static char *command_path_from_artifact(const char *artifact) {
 	return path;
 }
 
-static char *build_link_command(const ObjectList *objects,
+static char *build_link_command(const Manifest *manifest,
+				const ObjectList *objects,
 				const char *artifact) {
-	size_t length = strlen("cc") + strlen(" -o ") + strlen(artifact);
+	size_t length =
+		strlen(manifest->ld) + strlen(" -o ") + strlen(artifact);
 
 	for (size_t i = 0; i < objects->count; i++) {
 		length += 1 + strlen(objects->files[i]);
@@ -134,18 +136,23 @@ static char *build_link_command(const ObjectList *objects,
 	char *command = malloc(length + 1);
 
 	if (!command) {
-		fprintf(stderr, "Failed to allocate linker command\n");
+		fprintf(
+			stderr, "Failed to allocate linker command\n");
 
 		return NULL;
 	}
 
 	command[0] = '\0';
 
-	strcat(command, "cc");
+	strcat(
+		command,
+		manifest->ld);
 
 	for (size_t i = 0; i < objects->count; i++) {
 		strcat(command, " ");
-		strcat(command, objects->files[i]);
+		strcat(
+			command,
+			objects->files[i]);
 	}
 
 	strcat(command, " -o ");
@@ -252,7 +259,10 @@ static int should_link(const ObjectList *objects,
 	return 0;
 }
 
-static int link_artifact(const ObjectList *objects, const char *artifact) {
+static int link_artifact(
+	const Manifest *manifest,
+			 const ObjectList *objects,
+			 const char *artifact) {
 	const size_t argument_count = 1 + objects->count + 2 + 1;
 
 	const char **argv = calloc(argument_count, sizeof(char *));
@@ -265,9 +275,11 @@ static int link_artifact(const ObjectList *objects, const char *artifact) {
 
 	size_t index = 0;
 
-	argv[index++] = "cc";
+	argv[index++] = manifest->ld;
 
-	for (size_t i = 0; i < objects->count; i++) {
+	for (
+		size_t i = 0;
+		i < objects->count; i++) {
 		argv[index++] = objects->files[i];
 	}
 
@@ -275,7 +287,11 @@ static int link_artifact(const ObjectList *objects, const char *artifact) {
 	argv[index++] = artifact;
 	argv[index] = NULL;
 
-	const int result = process_run("cc", argv);
+	const int result =
+		process_run(
+			manifest->ld,
+			argv
+		);
 
 	free(argv);
 
@@ -320,7 +336,11 @@ int link_objects(const Manifest *manifest,
 		return 0;
 	}
 
-	char *command = build_link_command(objects, artifact);
+	char *command =
+		build_link_command(
+			manifest,
+			objects,
+			artifact);
 
 	if (!command) {
 		free(command_path);
@@ -331,7 +351,11 @@ int link_objects(const Manifest *manifest,
 	if (should_link(objects, artifact, command_path, command)) {
 		printf(BLUE "Linking" RESET "\t\t%s\n", manifest->name);
 
-		const int result = link_artifact(objects, artifact);
+		const int result =
+			link_artifact(
+				manifest,
+				objects,
+				artifact);
 
 		if (result != 0) {
 			fprintf(stderr, "Failed to link %s (exit code %d)\n",
