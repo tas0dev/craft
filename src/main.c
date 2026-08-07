@@ -9,6 +9,7 @@
 #include "app.h"
 #include "cli.h"
 #include "commands/help.h"
+#include "commands/version.h"
 #include <stdio.h>
 
 int main(const int argc, char **argv) {
@@ -19,9 +20,10 @@ int main(const int argc, char **argv) {
 
 	const enum Commands command = match_commands(argv[1]);
 
-	if (command == Help) print_help(argc, argv);
-
-	if (command == Unknown) {
+	switch (command) {
+	case Help: print_help(argc, argv); break;
+	case Version: print_version(argc, argv); break;
+	default:
 		printf(RED "Unknown command: " RESET "%s\n", argv[1]);
 		return 1;
 	}

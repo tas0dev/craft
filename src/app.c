@@ -12,5 +12,7 @@
 enum Commands match_commands(const char *command) {
 	if (strcmp(command, "help") == 0 || strcmp(command, "-h") == 0)
 		return Help;
+	if (strcmp(command, "version") == 0 || strcmp(command, "-v") == 0)
+		return Version;
 	return Unknown;
 }
