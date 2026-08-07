@@ -4,8 +4,9 @@ project('craft', 'c',
 
 craft = executable('craft',
                    'src/main.c',
-                   'src/commands/help.c',
                    'src/app.c',
+                   'src/commands/help.c',
+                   'src/commands/version.c',
                    install : true)
 
 test('test', craft)
