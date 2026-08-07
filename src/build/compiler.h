@@ -8,5 +8,16 @@
 
 #ifndef CRAFT_COMPILER_H
 #define CRAFT_COMPILER_H
+#include "source.h"
 
+typedef struct {
+	char **files;
+	size_t count;
+} ObjectList;
+
+ObjectList *compile_sources(const Manifest *manifest,
+			    const SourceList *sources,
+			    const char *project_root);
+
+void object_list_free(ObjectList *objects);
 #endif // CRAFT_COMPILER_H

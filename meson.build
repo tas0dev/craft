@@ -17,6 +17,7 @@ craft = executable('craft',
                    'src/toml/lexer.c',
                    'src/toml/parser.c',
                    'src/toml/toml.c',
+                   'src/util/process.c',
                    include_directories : include,
                    install : true
 )

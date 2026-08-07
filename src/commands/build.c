@@ -8,6 +8,7 @@
 
 #include "build.h"
 #include "app.h"
+#include "build/compiler.h"
 #include "build/manifest.h"
 #include "build/project.h"
 #include "build/source.h"
@@ -63,6 +64,25 @@ int run_build(const int argc, char **argv) {
 	}
 
 	SourceList *sources = source_collect(manifest, project_root);
+
+	ObjectList *objects = compile_sources(manifest, sources, project_root);
+
+	if (!objects) {
+		fprintf(stderr, RED "Failed to compile sources\n" RESET);
+
+		source_list_free(sources);
+		manifest_free(manifest);
+		free(project_root);
+
+		return 1;
+	}
+
+	printf("objects:\n");
+
+	for (size_t i = 0; i < objects->count; i++)
+		printf("\t%s\n", objects->files[i]);
+
+	object_list_free(objects);
 
 	if (!sources) {
 		fprintf(stderr, RED "Failed to collect sources\n" RESET);
