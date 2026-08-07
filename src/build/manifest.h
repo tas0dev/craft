@@ -20,6 +20,9 @@ typedef struct {
 	size_t include_dir_count;
 	char **cflags;
 	size_t cflags_count;
+	char **ldflags;
+	size_t ldflags_count;
+	char *linker_script;
 } Manifest;
 
 typedef struct {

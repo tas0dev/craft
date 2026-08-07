@@ -125,7 +125,8 @@ static char *command_path_from_artifact(const char *artifact) {
 
 static char *build_link_command(const Manifest *manifest,
 				const ObjectList *objects,
-				const char *artifact) {
+				const char *artifact,
+				const char *project_root) {
 	size_t length =
 		strlen(manifest->ld) + strlen(" -o ") + strlen(artifact);
 
@@ -133,11 +134,22 @@ static char *build_link_command(const Manifest *manifest,
 		length += 1 + strlen(objects->files[i]);
 	}
 
+	for (size_t i = 0; i < manifest->ldflags_count; i++) {
+		length += 1 + strlen(manifest->ldflags[i]);
+	}
+
+	if (manifest->linker_script) {
+		length += strlen(" -T ");
+		length += strlen(project_root);
+		length += 1;
+		length += strlen(manifest->linker_script);
+	}
+
 	char *command = malloc(length + 1);
 
 	if (!command) {
-		fprintf(
-			stderr, "Failed to allocate linker command\n");
+		fprintf(stderr,
+			"Failed to allocate linker command\n");
 
 		return NULL;
 	}
@@ -146,13 +158,28 @@ static char *build_link_command(const Manifest *manifest,
 
 	strcat(
 		command,
-		manifest->ld);
+		manifest->ld
+	);
 
-	for (size_t i = 0; i < objects->count; i++) {
+	for (
+		size_t i = 0; i < objects->count; i++) {
 		strcat(command, " ");
-		strcat(
-			command,
-			objects->files[i]);
+		strcat(command,
+			objects->files[i]
+		);
+	}
+
+	for (
+		size_t i = 0; i < manifest->ldflags_count; i++) {
+		strcat(command, " ");
+		strcat(command, manifest->ldflags[i]);
+	}
+
+	if (manifest->linker_script) {
+		strcat(command, " -T ");
+		strcat(command, project_root);
+		strcat(command, "/");
+		strcat(command, manifest->linker_script);
 	}
 
 	strcat(command, " -o ");
@@ -261,38 +288,68 @@ static int should_link(const ObjectList *objects,
 
 static int link_artifact(
 	const Manifest *manifest,
-			 const ObjectList *objects,
-			 const char *artifact) {
-	const size_t argument_count = 1 + objects->count + 2 + 1;
+	const ObjectList *objects,
+	const char *artifact,
+	const char *project_root) {
+	const size_t linker_script_argument_count =
+		manifest->linker_script ? 2 : 0;
+
+	const size_t argument_count = 1 + objects->count +
+				      manifest->ldflags_count +
+				      linker_script_argument_count + 2 + 1;
 
 	const char **argv = calloc(argument_count, sizeof(char *));
 
 	if (!argv) {
-		fprintf(stderr, "Failed to allocate linker arguments\n");
+		fprintf(stderr, "Failed to allocate linker arguments\n"
+		);
 
 		return -1;
+	}
+
+	char *linker_script_path = NULL;
+
+	if (manifest->linker_script) {
+		linker_script_path =
+			path_join(project_root, manifest->linker_script);
+
+		if (!linker_script_path) {
+			free(argv);
+			return -1;
+		}
 	}
 
 	size_t index = 0;
 
 	argv[index++] = manifest->ld;
 
+	for (size_t i = 0; i < objects->count;
+		i++
+	) {
+		argv[index++] = objects->files[i];
+	}
+
 	for (
 		size_t i = 0;
-		i < objects->count; i++) {
-		argv[index++] = objects->files[i];
+		i < manifest->ldflags_count; i++) {
+		argv[index++] = manifest->ldflags[i];
+	}
+
+	if (linker_script_path) {
+		argv[index++] = "-T";
+		argv[index++] = linker_script_path;
 	}
 
 	argv[index++] = "-o";
 	argv[index++] = artifact;
 	argv[index] = NULL;
 
-	const int result =
-		process_run(
+	const int result = process_run(
 			manifest->ld,
 			argv
 		);
 
+	free(linker_script_path);
 	free(argv);
 
 	return result;
@@ -340,7 +397,9 @@ int link_objects(const Manifest *manifest,
 		build_link_command(
 			manifest,
 			objects,
-			artifact);
+			artifact,
+			project_root
+		);
 
 	if (!command) {
 		free(command_path);
@@ -355,7 +414,9 @@ int link_objects(const Manifest *manifest,
 			link_artifact(
 				manifest,
 				objects,
-				artifact);
+				artifact,
+				project_root
+			);
 
 		if (result != 0) {
 			fprintf(stderr, "Failed to link %s (exit code %d)\n",
