@@ -8,4 +8,4 @@
 
 #include "lib.h"
 
-int main(void) {}
+int main(void) { print_hello(); }

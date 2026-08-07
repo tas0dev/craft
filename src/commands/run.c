@@ -39,52 +39,86 @@ static char *path_join(const char *left, const char *right) {
 	return path;
 }
 
-static char *artifact_path(const Manifest *manifest, const char *project_root) {
-	char *artifact_root = path_join(project_root, "target/");
+static char *artifact_path(const BuildTarget *target,
+			   const char *project_root) {
+	char *target_root = path_join(project_root, "target");
 
-	if (!artifact_root) return NULL;
+	if (!target_root) return NULL;
 
 #ifdef _WIN32
-	const size_t name_length = strlen(manifest->name) + strlen(".exe") + 1;
+	const size_t name_length = strlen(target->name) + strlen(".exe") + 1;
 
-	char *name = malloc(name_length);
+	char *name =
+		malloc(name_length);
 
 	if (!name) {
-		fprintf(stderr, "Failed to allocate artifact name\n");
+		fprintf(
+			stderr, "Failed to allocate artifact name\n");
 
-		free(artifact_root);
+		free(target_root);
 		return NULL;
 	}
 
-	snprintf(name, name_length, "%s.exe", manifest->name);
+	snprintf(
+		name,
+		name_length, "%s.exe", target->name);
 #else
-	char *name = malloc(strlen(manifest->name) + 1);
+	char *name = malloc(strlen(target->name) + 1);
 
 	if (!name) {
-		fprintf(stderr, "Failed to allocate artifact name\n");
+		fprintf(stderr,
+			"Failed to allocate artifact name\n");
 
-		free(artifact_root);
+		free(target_root);
 		return NULL;
 	}
 
-	strcpy(name, manifest->name);
+	strcpy(name, target->name
+	);
 #endif
 
-	char *path = path_join(artifact_root, name);
+	char *path = path_join(target_root,
+			name);
 
 	free(name);
-	free(artifact_root);
+	free(target_root);
 
 	return path;
 }
 
-int run_run(const int argc, char **argv) {
-	if (run_build(argc, argv) != 0) return 1;
+static BuildTarget *find_runnable_target(
+	const Manifest *manifest) {
+	BuildTarget *result = NULL;
 
+	for (size_t i = 0; i < manifest->target_count; i++) {
+		BuildTarget *target = &manifest->targets[i];
+
+		if (target->target_type != Executable) continue;
+
+		if (result) {
+			fprintf(stderr,
+				"Multiple executable targets found. "
+				"Specify a target with 'craft run <target>'\n");
+
+			return NULL;
+		}
+
+		result = target;
+	}
+
+	if (!result) { fprintf(stderr, "No executable target found\n"); }
+
+	return result;
+}
+
+int run_run(const int argc, char **argv) {
 	char cwd[4096];
 
 	if (!getcwd(cwd, sizeof(cwd))) {
-		fprintf(stderr, RED "Failed to get current directory\n" RESET);
+		fprintf(
+			stderr,
+			RED "Failed to get current directory\n" RESET
+		);
 
 		return 1;
 	}
@@ -92,19 +126,24 @@ int run_run(const int argc, char **argv) {
 	char *project_root = project_find_root(cwd);
 
 	if (!project_root) {
-		fprintf(stderr, RED "Could not find " MANIFEST_FILE "\n" RESET);
+		fprintf(
+			stderr, RED "Could not find " MANIFEST_FILE "\n" RESET);
 
 		return 1;
 	}
 
 	ManifestError error = {0};
 
-	Manifest *manifest = manifest_load(project_root, &error);
+	Manifest *manifest = manifest_load(project_root, &error
+		);
 
 	if (!manifest) {
-		fprintf(stderr, RED "Failed to load manifest" RESET);
+		fprintf(
+			stderr, RED "Failed to load manifest" RESET);
 
-		if (error.message) fprintf(stderr, ": %s", error.message);
+		if (error.message) fprintf(
+				stderr,
+				": %s", error.message);
 
 		fputc('\n', stderr);
 
@@ -112,20 +151,76 @@ int run_run(const int argc, char **argv) {
 		return 1;
 	}
 
-	char *artifact = artifact_path(manifest, project_root);
+	BuildTarget *target = NULL;
+
+	if (argc >= 3) {
+		target = manifest_find_target(
+				manifest,
+				argv[2]
+			);
+
+		if (!target) {
+			fprintf(stderr, RED "Unknown target: " RESET "%s\n",
+				argv[2]);
+
+			manifest_free(manifest);
+			free(project_root);
+
+			return 1;
+		}
+
+		if (target->target_type != Executable) {
+			fprintf(stderr,
+				RED "Target is not executable: " RESET "%s\n",
+				target->name);
+
+			manifest_free(manifest);
+			free(project_root);
+
+			return 1;
+		}
+	} else {
+		target = find_runnable_target(manifest);
+
+		if (!target) {
+			manifest_free(manifest);
+			free(project_root);
+
+			return 1;
+		}
+	}
+
+	char *build_argv[] = {argv[0], "build", target->name, NULL};
+
+	if (run_build(3, build_argv) != 0) {
+		manifest_free(manifest);
+		free(project_root);
+
+		return 1;
+	}
+
+	char *artifact = artifact_path(target, project_root);
 
 	if (!artifact) {
 		manifest_free(manifest);
 		free(project_root);
+
 		return 1;
 	}
 
 	const char *run_argv[] = {artifact, NULL};
 
-	const int result = process_run(artifact, run_argv);
+	const int result =
+		process_run(
+			artifact,
+			run_argv
+		);
 
 	if (result == -1) {
-		fprintf(stderr, RED "Failed to run %s\n" RESET, manifest->name);
+		fprintf(
+			stderr,
+			RED "Failed to run %s\n" RESET,
+			target->name);
 
 		free(artifact);
 		manifest_free(manifest);
