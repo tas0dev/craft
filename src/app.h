@@ -21,6 +21,7 @@ enum Commands {
 	Build,
 	Clean,
 	Run,
+	Targets,
 	UnknownCommand,
 };
 

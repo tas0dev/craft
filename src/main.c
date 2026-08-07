@@ -12,6 +12,7 @@
 #include "commands/clean.h"
 #include "commands/help.h"
 #include "commands/run.h"
+#include "commands/targets.h"
 #include "commands/version.h"
 #include <stdio.h>
 
@@ -29,6 +30,7 @@ int main(const int argc, char **argv) {
 	case Build: run_build(argc, argv); break;
 	case Clean: run_clean(argc, argv); break;
 	case Run: run_run(argc, argv); break;
+	case Targets: run_targets(argc, argv); break;
 	default:
 		printf(RED "Unknown command: " RESET "%s\n", argv[1]);
 		return 1;
