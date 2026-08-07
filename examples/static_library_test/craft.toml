@@ -1,0 +1,10 @@
+[project]
+name = "StaticLibraryTest"
+
+[target]
+type = "dynlib"
+cflags = [
+    "-Wall",
+    "-Wextra",
+    "-O2"
+]
