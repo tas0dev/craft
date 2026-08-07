@@ -22,6 +22,7 @@ enum Commands {
 	Clean,
 	Run,
 	Targets,
+	Install,
 	UnknownCommand,
 };
 
