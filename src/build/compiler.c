@@ -21,6 +21,11 @@
 #include <errno.h>
 #endif
 
+typedef struct {
+	char **items;
+	size_t count;
+} IncludeList;
+
 static char *path_join(const char *left, const char *right) {
 	const size_t length = strlen(left) + 1 + strlen(right) + 1;
 
@@ -31,6 +36,97 @@ static char *path_join(const char *left, const char *right) {
 	snprintf(path, length, "%s/%s", left, right);
 
 	return path;
+}
+
+static void include_list_free(IncludeList *list) {
+	if (!list) return;
+
+	for (size_t i = 0; i < list->count; i++)
+		free(list->items[i]);
+
+	free(list->items);
+
+	list->items = NULL;
+	list->count = 0;
+}
+
+static int include_list_contains(const IncludeList *list, const char *path) {
+	for (size_t i = 0; i < list->count; i++) {
+		if (strcmp(list->items[i], path) == 0) return 1;
+	}
+
+	return 0;
+}
+
+static int include_list_add(IncludeList *list, const char *path) {
+	if (include_list_contains(list, path)) return 1;
+
+	char **items = realloc(list->items, (list->count + 1) * sizeof(char *));
+
+	if (!items) {
+		fprintf(stderr, "Failed to allocate include list\n");
+
+		return 0;
+	}
+
+	list->items = items;
+
+	list->items[list->count] = malloc(strlen(path) + 1);
+
+	if (!list->items[list->count]) {
+		fprintf(stderr, "Failed to allocate include path\n");
+
+		return 0;
+	}
+
+	strcpy(list->items[list->count], path);
+
+	list->count++;
+
+	return 1;
+}
+
+static int collect_target_includes(const Manifest *manifest,
+				   const BuildTarget *target,
+				   const char *project_root,
+				   IncludeList *includes) {
+	for (size_t i = 0; i < target->include_dir_count; i++) {
+		char *include_path =
+			path_join(project_root, target->include_dirs[i]);
+
+		if (!include_path) {
+			fprintf(stderr, "Failed to create include path: %s\n",
+				target->include_dirs[i]);
+
+			return 0;
+		}
+
+		if (!include_list_add(includes, include_path)) {
+			free(include_path);
+			return 0;
+		}
+
+		free(include_path);
+	}
+
+	for (size_t i = 0; i < target->dependency_count; i++) {
+		BuildTarget *dependency =
+			manifest_find_target(manifest, target->dependencies[i]);
+
+		if (!dependency) {
+			fprintf(stderr, "Unknown dependency: %s\n",
+				target->dependencies[i]);
+
+			return 0;
+		}
+
+		if (!collect_target_includes(manifest, dependency, project_root,
+					     includes)) {
+			return 0;
+		}
+	}
+
+	return 1;
 }
 
 static int create_directory(const char *path) {
@@ -121,21 +217,26 @@ static int object_list_add(ObjectList *objects, const char *path) {
 	return 1;
 }
 
-static char *build_compile_command(const Manifest *manifest,
-				   const BuildTarget *target,
-				   const SourceFile *source,
-				   const char *object_path,
-				   const char *dependency_path,
+static char *build_compile_command(
+	const Manifest *manifest,
+	const BuildTarget *target,
+	const SourceFile *source,
+	const char *object_path,
+	const char *dependency_path,
 				   const char *project_root) {
-	size_t length = 0;
+	IncludeList includes = {0};
 
-	length += strlen(manifest->cc);
+	if (!collect_target_includes(manifest, target, project_root,
+				     &includes)) {
+		include_list_free(&includes);
+		return NULL;
+	}
 
-	for (size_t i = 0; i < target->include_dir_count; i++) {
+	size_t length = strlen(manifest->cc);
+
+	for (size_t i = 0; i < includes.count; i++) {
 		length += strlen(" -I");
-		length += strlen(project_root);
-		length += 1;
-		length += strlen(target->include_dirs[i]);
+		length += strlen(includes.items[i]);
 	}
 
 	for (size_t i = 0; i < target->cflags_count; i++) {
@@ -152,12 +253,17 @@ static char *build_compile_command(const Manifest *manifest,
 	length += strlen(" -o ");
 	length += strlen(object_path);
 
-	char *command = malloc(length + 1);
+	char *command =
+		malloc(length + 1);
 
 	if (!command) {
-		fprintf(stderr, "Failed to allocate compile command for %s\n",
-			source->relative_path);
+		fprintf(
+			stderr,
+			"Failed to allocate compile command for %s\n",
+			source->relative_path
+		);
 
+		include_list_free(&includes);
 		return NULL;
 	}
 
@@ -165,16 +271,18 @@ static char *build_compile_command(const Manifest *manifest,
 
 	strcat(command, manifest->cc);
 
-	for (size_t i = 0; i < target->include_dir_count; i++) {
+	for (size_t i = 0; i < includes.count; i++) {
 		strcat(command, " -I");
-		strcat(command, project_root);
-		strcat(command, "/");
-		strcat(command, target->include_dirs[i]);
+		strcat(command, includes.items[i]
+		);
 	}
 
-	for (size_t i = 0; i < target->cflags_count; i++) {
+	for (
+		size_t i = 0;
+		i < target->cflags_count; i++) {
 		strcat(command, " ");
-		strcat(command, target->cflags[i]);
+		strcat(command, target->cflags[i]
+		);
 	}
 
 	strcat(command, " -MMD -MF ");
@@ -185,6 +293,8 @@ static char *build_compile_command(const Manifest *manifest,
 
 	strcat(command, " -o ");
 	strcat(command, object_path);
+
+	include_list_free(&includes);
 
 	return command;
 }
@@ -359,14 +469,24 @@ static int should_compile(const char *object_path,
 	return 0;
 }
 
-static int compile_source(const Manifest *manifest,
-			  const BuildTarget *target,
-			  const SourceFile *source,
-			  const char *object_path,
-			  const char *dependency_path,
-			  const char *project_root) {
-	const size_t argument_count = 1 + target->include_dir_count * 2 +
-				      target->cflags_count + 8 + 1;
+static int compile_source(
+	const Manifest *manifest,
+	const BuildTarget *target,
+	const SourceFile *source,
+	const char *object_path,
+	const char *dependency_path,
+	const char *project_root
+) {
+	IncludeList includes = {0};
+
+	if (!collect_target_includes(manifest, target, project_root,
+				     &includes)) {
+		include_list_free(&includes);
+		return -1;
+	}
+
+	const size_t argument_count =
+		1 + includes.count * 2 + target->cflags_count + 8 + 1;
 
 	const char **argv = calloc(argument_count, sizeof(char *));
 
@@ -375,44 +495,25 @@ static int compile_source(const Manifest *manifest,
 			"Failed to allocate compiler arguments for %s\n",
 			source->relative_path);
 
-		return -1;
-	}
-
-	char **include_paths =
-		calloc(target->include_dir_count, sizeof(char *));
-
-	if (!include_paths) {
-		fprintf(stderr, "Failed to allocate include paths for %s\n",
-			source->relative_path);
-
-		free(argv);
+		include_list_free(&includes);
 		return -1;
 	}
 
 	size_t argument_index = 0;
-	size_t include_index = 0;
 
 	argv[argument_index++] = manifest->cc;
 
-	for (size_t i = 0; i < target->include_dir_count; i++) {
-		char *include_path =
-			path_join(project_root, target->include_dirs[i]);
-
-		if (!include_path) {
-			fprintf(stderr,
-				"Failed to create include path '%s' for %s\n",
-				target->include_dirs[i], source->relative_path);
-
-			goto error;
-		}
-
-		include_paths[include_index++] = include_path;
-
+	for (
+		size_t i = 0;
+		i < includes.count; i++
+	) {
 		argv[argument_index++] = "-I";
-		argv[argument_index++] = include_path;
+		argv[argument_index++] = includes.items[i];
 	}
 
-	for (size_t i = 0; i < target->cflags_count; i++) {
+	for (size_t i = 0; i < target->cflags_count;
+		i++
+	) {
 		argv[argument_index++] = target->cflags[i];
 	}
 
@@ -428,28 +529,19 @@ static int compile_source(const Manifest *manifest,
 
 	argv[argument_index] = NULL;
 
-	printf(GREEN "Compiling\t" RESET "%s\n", source->relative_path);
+	printf(
+		GREEN "Compiling" RESET "\t%s\n", source->relative_path);
 
-	const int result = process_run(manifest->cc, argv);
+	const int result =
+		process_run(
+			manifest->cc,
+			argv
+		);
 
-	for (size_t i = 0; i < include_index; i++) {
-		free(include_paths[i]);
-	}
-
-	free(include_paths);
 	free(argv);
+	include_list_free(&includes);
 
 	return result;
-
-error:
-	for (size_t i = 0; i < include_index; i++) {
-		free(include_paths[i]);
-	}
-
-	free(include_paths);
-	free(argv);
-
-	return -1;
 }
 
 ObjectList *compile_sources(const Manifest *manifest,

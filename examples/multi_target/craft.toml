@@ -5,12 +5,12 @@ name = "MultiTargetTest"
 dependencies = [
     "testlib"
 ]
-include_dirs = [
-    "testlib"
-]
 
 [target.testlib]
 type = "staticlib"
 source_dirs = [
+    "testlib"
+]
+include_dirs = [
     "testlib"
 ]
