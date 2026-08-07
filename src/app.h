@@ -16,6 +16,7 @@
 enum Commands {
 	Help,
 	Version,
+	Build,
 	Unknown
 };
 

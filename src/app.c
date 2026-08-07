@@ -14,5 +14,6 @@ enum Commands match_commands(const char *command) {
 		return Help;
 	if (strcmp(command, "version") == 0 || strcmp(command, "-v") == 0)
 		return Version;
+	if (strcmp(command, "build") == 0) return Build;
 	return Unknown;
 }
