@@ -12,11 +12,17 @@
 #include <stddef.h>
 
 typedef struct {
-	char **files;
+	char *path;
+	char *relative_path;
+} SourceFile;
+
+typedef struct {
+	SourceFile *files;
 	size_t count;
 } SourceList;
 
 SourceList *source_collect(const Manifest *manifest, const char *project_root);
-void source_list_free(SourceList *list);
+
+void source_list_free(SourceList *sources);
 
 #endif // CRAFT_SOURCES_H

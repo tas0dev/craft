@@ -80,6 +80,11 @@ int run_build(const int argc, char **argv) {
 	for (size_t i = 0; i < sources->count; i++)
 		printf("\t%s\n", sources->files[i]);
 
+	for (size_t i = 0; i < sources->count; i++) {
+		printf("\t%s -> %s\n", sources->files[i].path,
+		       sources->files[i].relative_path);
+	}
+
 	source_list_free(sources);
 	manifest_free(manifest);
 	free(project_root);

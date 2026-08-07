@@ -37,17 +37,34 @@ static char *path_join(const char *left, const char *right) {
 	return path;
 }
 
-static int source_list_add(SourceList *sources, const char *path) {
-	char **files =
-		realloc(sources->files, (sources->count + 1) * sizeof(char *));
+static int source_list_add(SourceList *sources,
+			   const char *path,
+			   const char *relative_path) {
+	SourceFile *files = realloc(sources->files,
+				    (sources->count + 1) * sizeof(SourceFile));
+
 	if (!files) return 0;
 
 	sources->files = files;
-	sources->files[sources->count] = malloc(strlen(path) + 1);
 
-	if (!sources->files[sources->count]) return 0;
+	SourceFile *file = &sources->files[sources->count];
 
-	strcpy(sources->files[sources->count], path);
+	file->path = malloc(strlen(path) + 1);
+
+	if (!file->path) return 0;
+
+	strcpy(file->path, path);
+
+	file->relative_path = malloc(strlen(relative_path) + 1);
+
+	if (!file->relative_path) {
+		free(file->path);
+		file->path = NULL;
+		return 0;
+	}
+
+	strcpy(file->relative_path, relative_path);
+
 	sources->count++;
 
 	return 1;
@@ -55,12 +72,15 @@ static int source_list_add(SourceList *sources, const char *path) {
 
 #ifdef _WIN32
 
-static int collect_directory(SourceList *sources, const char *directory) {
+static int collect_directory(SourceList *sources,
+			     const char *directory,
+			     const char *relative_dir) {
 	char *search_path = path_join(directory, "*");
 
 	if (!search_path) return 0;
 
 	WIN32_FIND_DATAA entry;
+
 	HANDLE handle = FindFirstFileA(search_path, &entry);
 
 	free(search_path);
@@ -68,9 +88,11 @@ static int collect_directory(SourceList *sources, const char *directory) {
 	if (handle == INVALID_HANDLE_VALUE) return 0;
 
 	do {
-		if (strcmp(entry.cFileName, ".") == 0 ||
-		    strcmp(entry.cFileName, "..") == 0)
+		if (
+			strcmp(entry.cFileName, ".") == 0 ||
+		    strcmp(entry.cFileName, "..") == 0) {
 			continue;
+		}
 
 		char *path = path_join(directory, entry.cFileName);
 
@@ -79,21 +101,46 @@ static int collect_directory(SourceList *sources, const char *directory) {
 			return 0;
 		}
 
+		char *relative_path = NULL;
+
+		if (relative_dir && relative_dir[0] != '\0')
+			relative_path =
+				path_join(relative_dir, entry.cFileName);
+		else {
+			relative_path = malloc(strlen(entry.cFileName) + 1);
+
+			if (relative_path)
+				strcpy(relative_path, entry.cFileName);
+		}
+
+		if (!relative_path) {
+			free(path);
+			FindClose(handle);
+			return 0;
+		}
+
 		if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-			if (!collect_directory(sources, path)) {
+			if (!collect_directory(sources, path, relative_path)) {
+				free(relative_path);
 				free(path);
 				FindClose(handle);
 				return 0;
-			}
+			    }
 		} else if (is_source_file(path)) {
-			if (!source_list_add(sources, path)) {
+			if (!source_list_add(
+				    sources,
+				    path,
+				    relative_path)) {
+				free(relative_path);
 				free(path);
 				FindClose(handle);
 				return 0;
 			}
 		}
 
+		free(relative_path);
 		free(path);
+
 	} while (FindNextFileA(handle, &entry));
 
 	FindClose(handle);
@@ -154,7 +201,10 @@ static int collect_directory(SourceList *sources, const char *directory) {
 
 #endif
 
-SourceList *source_collect(const Manifest *manifest, const char *project_root) {
+SourceList *source_collect(
+	const Manifest *manifest,
+	const char *project_root
+) {
 	if (!manifest || !project_root) return NULL;
 
 	SourceList *sources = calloc(1, sizeof(*sources));
@@ -162,19 +212,25 @@ SourceList *source_collect(const Manifest *manifest, const char *project_root) {
 	if (!sources) return NULL;
 
 	for (size_t i = 0; i < manifest->source_dir_count; i++) {
-		char *source_dir =
-			path_join(project_root, manifest->source_dirs[i]);
+		const char *source_dir_name = manifest->source_dirs[i];
+
+		char *source_dir = path_join(project_root, source_dir_name);
 
 		if (!source_dir) {
 			source_list_free(sources);
 			return NULL;
 		}
 
-		if (!collect_directory(sources, source_dir)) {
+		const char *relative_root = "";
+
+		if (strcmp(source_dir_name, "src") != 0)
+			relative_root = source_dir_name;
+
+		if (!collect_directory(sources, source_dir, relative_root)) {
 			free(source_dir);
 			source_list_free(sources);
 			return NULL;
-		    }
+		}
 
 		free(source_dir);
 	}
@@ -183,10 +239,13 @@ SourceList *source_collect(const Manifest *manifest, const char *project_root) {
 }
 
 void source_list_free(SourceList *sources) {
-	if (!sources) return;
+	if (!sources)
+		return;
 
-	for (size_t i = 0; i < sources->count; i++)
-		free(sources->files[i]);
+	for (size_t i = 0; i < sources->count; i++) {
+		free(sources->files[i].path);
+		free(sources->files[i].relative_path);
+	}
 
 	free(sources->files);
 	free(sources);
