@@ -9,6 +9,7 @@
 #include "app.h"
 #include "cli.h"
 #include "commands/build.h"
+#include "commands/clean.h"
 #include "commands/help.h"
 #include "commands/version.h"
 #include <stdio.h>
@@ -25,6 +26,7 @@ int main(const int argc, char **argv) {
 	case Help: print_help(argc, argv); break;
 	case Version: print_version(argc, argv); break;
 	case Build: run_build(argc, argv); break;
+	case Clean: run_clean(argc, argv); break;
 	default:
 		printf(RED "Unknown command: " RESET "%s\n", argv[1]);
 		return 1;
