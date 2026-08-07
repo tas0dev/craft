@@ -154,18 +154,29 @@ static int collect_directory(SourceList *sources, const char *directory) {
 
 #endif
 
-SourceList *source_collect(Manifest *manifest) {
-	if (!manifest) return NULL;
+SourceList *source_collect(const Manifest *manifest, const char *project_root) {
+	if (!manifest || !project_root) return NULL;
 
 	SourceList *sources = calloc(1, sizeof(*sources));
 
 	if (!sources) return NULL;
 
 	for (size_t i = 0; i < manifest->source_dir_count; i++) {
-		if (!collect_directory(sources, manifest->source_dirs[i])) {
+		char *source_dir =
+			path_join(project_root, manifest->source_dirs[i]);
+
+		if (!source_dir) {
 			source_list_free(sources);
 			return NULL;
 		}
+
+		if (!collect_directory(sources, source_dir)) {
+			free(source_dir);
+			source_list_free(sources);
+			return NULL;
+		    }
+
+		free(source_dir);
 	}
 
 	return sources;

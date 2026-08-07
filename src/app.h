@@ -19,7 +19,7 @@ enum Commands {
 	Help,
 	Version,
 	Build,
-	Unknown
+	UnknownCommand,
 };
 
 enum Commands match_commands(const char *command);
