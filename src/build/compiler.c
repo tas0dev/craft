@@ -7,6 +7,8 @@
  */
 
 #include "build/compiler.h"
+
+#include "cli.h"
 #include "util/process.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -430,8 +432,7 @@ static int compile_source(const Manifest *manifest,
 	argv[argument_index] = NULL;
 
 	printf(
-		"Compiling %s\n",
-		source->relative_path
+		GREEN "Compiling" RESET " %s\n", source->relative_path
 	);
 
 	const int result = process_run("cc", argv);
