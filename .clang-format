@@ -1,0 +1,40 @@
+# Copyright (c) 2026, mochiOS team.
+# This file is licensed under the Apache 2.0 License.
+#
+# Created by tas0dev
+
+Language: Cpp
+TabWidth: 8
+IndentWidth: 8
+ContinuationIndentWidth: 8
+UseTab: Always
+
+AlignAfterOpenBracket: true
+AlignArrayOfStructures: Left
+AlignConsecutiveAssignments:
+  AcrossEmptyLines: false
+  AcrossComments: true
+  AlignCompound: true
+
+AlignEscapedNewlines: Left
+AlignOperands: Align
+AlignTrailingComments: true
+
+AllowAllArgumentsOnNextLine: true
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: WithoutElse
+
+AlwaysBreakAfterReturnType: None
+
+BinPackArguments: true
+BinPackParameters: OnePerLine
+BraceWrapping:
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: false
+  AfterStruct: false
+  BeforeElse: false
+  BeforeWhile: false
+  IndentBraces: false
