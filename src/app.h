@@ -20,6 +20,7 @@ enum Commands {
 	Version,
 	Build,
 	Clean,
+	Run,
 	UnknownCommand,
 };
 

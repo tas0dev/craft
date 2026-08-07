@@ -11,11 +11,24 @@
 #ifdef _WIN32
 
 #include <process.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 int process_run(const char *program, const char *const argv[]) {
-	const intptr_t result = _spawnvp(_P_WAIT, program, argv);
+	const int has_path =
+		strchr(program, '/') != NULL || strchr(program, '\\') != NULL;
 
-	if (result == -1) return -1;
+	const intptr_t result = has_path ? _spawnv(_P_WAIT, program, argv)
+					 : _spawnvp(_P_WAIT, program, argv);
+
+	if (result == -1) {
+		fprintf(
+			stderr, "Failed to execute %s: %s\n", program,
+			strerror(errno));
+
+		return -1;
+	}
 
 	return (int)result;
 }
