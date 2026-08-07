@@ -211,6 +211,50 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 		strcpy(manifest->include_dirs[1], "include");
 	}
 
+	const TomlArray *cflags = toml_get_array(document, "target.cflags");
+
+	if (cflags) {
+		manifest->cflags_count = toml_array_length(cflags);
+
+		manifest->cflags =
+			calloc(manifest->cflags_count, sizeof(char *));
+
+		if (!manifest->cflags) {
+			manifest_free(manifest);
+			toml_free(document);
+			return NULL;
+		}
+
+		for (size_t i = 0; i < manifest->cflags_count; i++) {
+			const TomlValue *value = toml_array_get(cflags, i);
+
+			const char *cflag = toml_string(value);
+
+			if (!cflag) {
+				if (error) {
+					error->line = 0;
+					error->column = 0;
+					error->message = "target.cflags must "
+							 "contain strings";
+				}
+
+				manifest_free(manifest);
+				toml_free(document);
+				return NULL;
+			}
+
+			manifest->cflags[i] = malloc(strlen(cflag) + 1);
+
+			if (!manifest->cflags[i]) {
+				manifest_free(manifest);
+				toml_free(document);
+				return NULL;
+			}
+
+			strcpy(manifest->cflags[i], cflag);
+		}
+	}
+
 	toml_free(document);
 
 	return manifest;

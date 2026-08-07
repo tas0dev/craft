@@ -75,31 +75,6 @@ int run_build(const int argc, char **argv) {
 		return 1;
 	}
 
-	printf("objects:\n");
-
-	for (size_t i = 0; i < objects->count; i++)
-		printf("\t%s\n", objects->files[i]);
-
-	object_list_free(objects);
-
-	if (!sources) {
-		fprintf(stderr, RED "Failed to collect sources\n" RESET);
-
-		manifest_free(manifest);
-		free(project_root);
-		return 1;
-	}
-
-	printf("project: %s\n", manifest->name);
-	printf("root: %s\n", project_root);
-
-	printf("sources:\n");
-
-	for (size_t i = 0; i < sources->count; i++) {
-		printf("\t%s -> %s\n", sources->files[i].path,
-		       sources->files[i].relative_path);
-	}
-
 	source_list_free(sources);
 	manifest_free(manifest);
 	free(project_root);

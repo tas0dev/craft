@@ -2,6 +2,8 @@
 name = "Craft"
 
 [target]
-source_dirs = [
-    "src",
+cflags = [
+    "-Wall",
+    "-Wextra",
+    "-O2"
 ]

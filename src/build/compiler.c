@@ -119,6 +119,137 @@ static int object_list_add(ObjectList *objects, const char *path) {
 	return 1;
 }
 
+static char *build_compile_command(const Manifest *manifest,
+				   const SourceFile *source,
+				   const char *object_path,
+				   const char *dependency_path,
+				   const char *project_root) {
+	size_t length = strlen("cc") + strlen(source->path) +
+			strlen(object_path) + strlen(dependency_path) + 32;
+
+	for (size_t i = 0; i < manifest->include_dir_count; i++) {
+		length += strlen(project_root) +
+			  strlen(manifest->include_dirs[i]) + 8;
+	}
+
+	for (size_t i = 0; i < manifest->cflags_count; i++) {
+		length += strlen(manifest->cflags[i]) + 1;
+	}
+
+	char *command = calloc(length + 1, 1);
+
+	if (!command) return NULL;
+
+	strcat(command, "cc");
+
+	for (size_t i = 0; i < manifest->include_dir_count; i++) {
+		strcat(command, " -I");
+		strcat(command, project_root);
+		strcat(command, "/");
+		strcat(command, manifest->include_dirs[i]);
+	}
+
+	for (size_t i = 0; i < manifest->cflags_count; i++) {
+		strcat(command, " ");
+		strcat(command, manifest->cflags[i]);
+	}
+
+	strcat(command, " -MMD -MF ");
+	strcat(command, dependency_path);
+
+	strcat(command, " -c ");
+	strcat(command, source->path);
+
+	strcat(command, " -o ");
+	strcat(command, object_path);
+
+	return command;
+}
+
+static char *command_path_from_object(const char *object_path) {
+	char *path = malloc(strlen(object_path) + 1);
+
+	if (!path) return NULL;
+
+	strcpy(path, object_path);
+
+	char *extension = strrchr(path, '.');
+
+	if (!extension) {
+		free(path);
+		return NULL;
+	}
+
+	strcpy(extension, ".cmd");
+
+	return path;
+}
+
+static int command_matches(const char *command_path, const char *command) {
+	FILE *file = fopen(command_path, "rb");
+
+	if (!file) return 0;
+
+	if (fseek(file, 0, SEEK_END) != 0) {
+		fclose(file);
+		return 0;
+	}
+
+	const long size = ftell(file);
+
+	if (size < 0) {
+		fclose(file);
+		return 0;
+	}
+
+	rewind(file);
+
+	const size_t command_length = strlen(command);
+
+	if ((size_t)size != command_length) {
+		fclose(file);
+		return 0;
+	}
+
+	char *saved = malloc(command_length + 1);
+
+	if (!saved) {
+		fclose(file);
+		return 0;
+	}
+
+	const size_t read_size = fread(saved, 1, command_length, file);
+
+	fclose(file);
+
+	if (read_size != command_length) {
+		free(saved);
+		return 0;
+	}
+
+	saved[command_length] = '\0';
+
+	const int matches = strcmp(saved, command) == 0;
+
+	free(saved);
+
+	return matches;
+}
+
+static int command_write(const char *command_path, const char *command) {
+	FILE *file = fopen(command_path, "wb");
+
+	if (!file) return 0;
+
+	const size_t length = strlen(command);
+
+	const size_t written = fwrite(command, 1, length, file);
+
+	fclose(file);
+
+	return written == length;
+}
+
 static char *dependency_path_from_object(const char *object_path) {
 	char *path = malloc(strlen(object_path) + 1);
 
@@ -139,10 +270,14 @@ static char *dependency_path_from_object(const char *object_path) {
 }
 
 static int should_compile(const char *object_path,
-			  const char *dependency_path) {
+			  const char *dependency_path,
+			  const char *command_path,
+			  const char *command) {
 	struct stat object_stat;
 
 	if (stat(object_path, &object_stat) != 0) return 1;
+
+	if (!command_matches(command_path, command)) { return 1; }
 
 	FILE *file = fopen(dependency_path, "r");
 
@@ -157,12 +292,15 @@ static int should_compile(const char *object_path,
 		while (token) {
 			if (first_token) {
 				first_token = 0;
+
 				token = strtok(NULL, " \t\r\n");
+
 				continue;
 			}
 
 			if (strcmp(token, "\\") == 0) {
 				token = strtok(NULL, " \t\r\n");
+
 				continue;
 			}
 
@@ -192,10 +330,11 @@ static int compile_source(const Manifest *manifest,
 			  const char *object_path,
 			  const char *dependency_path,
 			  const char *project_root) {
-	const size_t argument_count =
-		1 + manifest->include_dir_count * 2 + 8 + 1;
+	const size_t argument_count = 1 + manifest->include_dir_count * 2 +
+				      manifest->cflags_count + 8 + 1;
 
-	const char **argv = calloc(argument_count, sizeof(char *));
+	const char **argv = calloc(argument_count, sizeof(char *)
+		);
 
 	if (!argv) return -1;
 
@@ -212,16 +351,25 @@ static int compile_source(const Manifest *manifest,
 
 	argv[argument_index++] = "cc";
 
-	for (size_t i = 0; i < manifest->include_dir_count; i++) {
+	for (
+		size_t i = 0; i < manifest->include_dir_count; i++) {
 		char *include_path =
-			path_join(project_root, manifest->include_dirs[i]);
+			path_join(
+				project_root, manifest->include_dirs[i]);
 
-		if (!include_path) goto error;
+		if (!include_path)
+			goto error;
 
 		include_paths[include_index++] = include_path;
 
 		argv[argument_index++] = "-I";
 		argv[argument_index++] = include_path;
+	}
+
+	for (
+		size_t i = 0;
+		i < manifest->cflags_count; i++) {
+		argv[argument_index++] = manifest->cflags[i];
 	}
 
 	argv[argument_index++] = "-MMD";
@@ -236,26 +384,32 @@ static int compile_source(const Manifest *manifest,
 
 	argv[argument_index] = NULL;
 
-	printf("Compiling %s\n", source->relative_path);
+	printf(
+		"Compiling %s\n",
+		source->relative_path);
 
 	const int result = process_run("cc", argv);
 
-	for (size_t i = 0; i < include_index; i++)
+	for (size_t i = 0; i < include_index; i++) {
 		free(include_paths[i]);
+	}
 
 	free(include_paths);
 	free(argv);
 
 	return result;
 
-error:
-	for (size_t i = 0; i < include_index; i++)
-		free(include_paths[i]);
+	error:
+		for (
+			size_t i = 0;
+			i < include_index; i++) {
+			free(include_paths[i]);
+		}
 
-	free(include_paths);
-	free(argv);
+		free(include_paths);
+		free(argv);
 
-	return -1;
+		return -1;
 }
 
 ObjectList *compile_sources(const Manifest *manifest,
@@ -287,47 +441,80 @@ ObjectList *compile_sources(const Manifest *manifest,
 			return NULL;
 		}
 
-		if (!create_parent_directories(object_path)) {
+		char *command_path = command_path_from_object(object_path);
+
+		if (!command_path) {
 			free(dependency_path);
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
 		}
 
-		if (!should_compile(object_path, dependency_path)) {
-			if (!object_list_add(objects, object_path)) {
+		char *command =
+			build_compile_command(manifest, source, object_path,
+					      dependency_path, project_root);
+
+		if (!command) {
+			free(command_path);
+			free(dependency_path);
+			free(object_path);
+			object_list_free(objects);
+			return NULL;
+		}
+
+		if (!create_parent_directories(object_path)) {
+			free(command);
+			free(command_path);
+			free(dependency_path);
+			free(object_path);
+			object_list_free(objects);
+			return NULL;
+		}
+
+		if (should_compile(object_path, dependency_path, command_path,
+				   command)) {
+			const int result =
+				compile_source(manifest, source, object_path,
+					       dependency_path, project_root);
+
+			if (result != 0) {
+				fprintf(stderr, "Failed to compile %s\n",
+					source->relative_path);
+
+				free(command);
+				free(command_path);
 				free(dependency_path);
 				free(object_path);
 				object_list_free(objects);
 				return NULL;
 			}
 
-			free(dependency_path);
-			free(object_path);
-			continue;
-		}
+			if (!command_write(command_path, command)) {
+				fprintf(stderr,
+					"Failed to write compile state for "
+					"%s\n",
+					source->relative_path);
 
-		const int result =
-			compile_source(manifest, source, object_path,
-				       dependency_path, project_root);
-
-		if (result != 0) {
-			fprintf(stderr, "Failed to compile %s\n",
-				source->relative_path);
-
-			free(dependency_path);
-			free(object_path);
-			object_list_free(objects);
-			return NULL;
+				free(command);
+				free(command_path);
+				free(dependency_path);
+				free(object_path);
+				object_list_free(objects);
+				return NULL;
+			}
 		}
 
 		if (!object_list_add(objects, object_path)) {
+			free(command);
+			free(command_path);
 			free(dependency_path);
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
 		}
 
+		free(command);
+		free(command_path);
 		free(dependency_path);
 		free(object_path);
 	}
