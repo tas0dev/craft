@@ -77,9 +77,6 @@ int run_build(const int argc, char **argv) {
 
 	printf("sources:\n");
 
-	for (size_t i = 0; i < sources->count; i++)
-		printf("\t%s\n", sources->files[i]);
-
 	for (size_t i = 0; i < sources->count; i++) {
 		printf("\t%s -> %s\n", sources->files[i].path,
 		       sources->files[i].relative_path);
