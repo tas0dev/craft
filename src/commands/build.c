@@ -9,10 +9,12 @@
 #include "build.h"
 #include "app.h"
 #include "build/compiler.h"
+#include "build/linker.h"
 #include "build/manifest.h"
 #include "build/project.h"
 #include "build/source.h"
 #include "cli.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #ifndef _WIN32
@@ -63,6 +65,15 @@ int run_build(const int argc, char **argv) {
 
 	SourceList *sources = source_collect(manifest, project_root);
 
+	if (!sources) {
+		fprintf(stderr, RED "Failed to collect sources\n" RESET);
+
+		manifest_free(manifest);
+		free(project_root);
+
+		return 1;
+	}
+
 	ObjectList *objects = compile_sources(manifest, sources, project_root);
 
 	if (!objects) {
@@ -75,6 +86,18 @@ int run_build(const int argc, char **argv) {
 		return 1;
 	}
 
+	if (!link_objects(manifest, objects, project_root)) {
+		fprintf(stderr, RED "Failed to link project\n" RESET);
+
+		object_list_free(objects);
+		source_list_free(sources);
+		manifest_free(manifest);
+		free(project_root);
+
+		return 1;
+	}
+
+	object_list_free(objects);
 	source_list_free(sources);
 	manifest_free(manifest);
 	free(project_root);

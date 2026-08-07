@@ -1,0 +1,361 @@
+/*
+ * Copyright (C) 2026 tas0dev
+ * This software is licensed under the GNU General Public License, version 3
+ * only.
+ *
+ * Created by tas0dev
+ */
+
+#include "linker.h"
+#include "cli.h"
+#include "util/process.h"
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/types.h>
+#endif
+
+static char *path_join(const char *left, const char *right) {
+	const size_t length = strlen(left) + 1 + strlen(right) + 1;
+
+	char *path = malloc(length);
+
+	if (!path) {
+		fprintf(stderr, "Failed to allocate path\n");
+		return NULL;
+	}
+
+	snprintf(path, length, "%s/%s", left, right);
+
+	return path;
+}
+
+static int create_directory(const char *path) {
+#ifdef _WIN32
+	if (_mkdir(path) == 0) return 1;
+#else
+	if (mkdir(path, 0755) == 0) return 1;
+#endif
+
+	return errno == EEXIST;
+}
+
+static char *artifact_path(const Manifest *manifest, const char *project_root) {
+	char *target_path = path_join(project_root, "target");
+
+	if (!target_path) return NULL;
+
+	if (!create_directory(target_path)) {
+		fprintf(stderr, "Failed to create target directory: %s\n",
+			target_path);
+
+		free(target_path);
+		return NULL;
+	}
+
+	char *artifact_root = path_join(target_path, ".");
+
+	free(target_path);
+
+	if (!artifact_root) return NULL;
+
+	if (!create_directory(artifact_root)) {
+		fprintf(stderr, "Failed to create artifact directory: %s\n",
+			artifact_root);
+
+		free(artifact_root);
+		return NULL;
+	}
+
+#ifdef _WIN32
+	const size_t name_length = strlen(manifest->name) + strlen(".exe") + 1;
+
+	char *artifact_name = malloc(name_length);
+
+	if (!artifact_name) {
+		fprintf(stderr, "Failed to allocate artifact name\n");
+
+		free(artifact_root);
+		return NULL;
+	}
+
+	snprintf(artifact_name, name_length, "%s.exe", manifest->name);
+#else
+	char *artifact_name = malloc(strlen(manifest->name) + 1);
+
+	if (!artifact_name) {
+		fprintf(stderr, "Failed to allocate artifact name\n");
+
+		free(artifact_root);
+		return NULL;
+	}
+
+	strcpy(artifact_name, manifest->name);
+#endif
+
+	char *path = path_join(artifact_root, artifact_name);
+
+	free(artifact_name);
+	free(artifact_root);
+
+	return path;
+}
+
+static char *command_path_from_artifact(const char *artifact) {
+	const size_t length = strlen(artifact) + strlen(".cmd") + 1;
+
+	char *path = malloc(length);
+
+	if (!path) {
+		fprintf(stderr, "Failed to allocate linker command path\n");
+
+		return NULL;
+	}
+
+	snprintf(path, length, "%s.cmd", artifact);
+
+	return path;
+}
+
+static char *build_link_command(const ObjectList *objects,
+				const char *artifact) {
+	size_t length = strlen("cc") + strlen(" -o ") + strlen(artifact);
+
+	for (size_t i = 0; i < objects->count; i++) {
+		length += 1 + strlen(objects->files[i]);
+	}
+
+	char *command = malloc(length + 1);
+
+	if (!command) {
+		fprintf(stderr, "Failed to allocate linker command\n");
+
+		return NULL;
+	}
+
+	command[0] = '\0';
+
+	strcat(command, "cc");
+
+	for (size_t i = 0; i < objects->count; i++) {
+		strcat(command, " ");
+		strcat(command, objects->files[i]);
+	}
+
+	strcat(command, " -o ");
+	strcat(command, artifact);
+
+	return command;
+}
+
+static int command_matches(const char *command_path, const char *command) {
+	FILE *file = fopen(command_path, "rb");
+
+	if (!file) return 0;
+
+	if (fseek(file, 0, SEEK_END) != 0) {
+		fclose(file);
+		return 0;
+	}
+
+	const long size = ftell(file);
+
+	if (size < 0) {
+		fclose(file);
+		return 0;
+	}
+
+	rewind(file);
+
+	const size_t command_length = strlen(command);
+
+	if ((size_t)size != command_length) {
+		fclose(file);
+		return 0;
+	}
+
+	char *saved = malloc(command_length + 1);
+
+	if (!saved) {
+		fclose(file);
+		return 0;
+	}
+
+	const size_t read_size = fread(saved, 1, command_length, file);
+
+	fclose(file);
+
+	if (read_size != command_length) {
+		free(saved);
+		return 0;
+	}
+
+	saved[command_length] = '\0';
+
+	const int matches = strcmp(saved, command) == 0;
+
+	free(saved);
+
+	return matches;
+}
+
+static int command_write(const char *command_path, const char *command) {
+	FILE *file = fopen(command_path, "wb");
+
+	if (!file) {
+		fprintf(stderr, "Failed to open linker command file: %s\n",
+			command_path);
+
+		return 0;
+	}
+
+	const size_t length = strlen(command);
+
+	const size_t written = fwrite(command, 1, length, file);
+
+	fclose(file);
+
+	if (written != length) {
+		fprintf(stderr, "Failed to write linker command file: %s\n",
+			command_path);
+
+		return 0;
+	}
+
+	return 1;
+}
+
+static int should_link(const ObjectList *objects,
+		       const char *artifact,
+		       const char *command_path,
+		       const char *command) {
+	struct stat artifact_stat;
+
+	if (stat(artifact, &artifact_stat) != 0) return 1;
+
+	if (!command_matches(command_path, command)) { return 1; }
+
+	for (size_t i = 0; i < objects->count; i++) {
+		struct stat object_stat;
+
+		if (stat(objects->files[i], &object_stat) != 0) { return 1; }
+
+		if (object_stat.st_mtime > artifact_stat.st_mtime) { return 1; }
+	}
+
+	return 0;
+}
+
+static int link_artifact(const ObjectList *objects, const char *artifact) {
+	const size_t argument_count = 1 + objects->count + 2 + 1;
+
+	const char **argv = calloc(argument_count, sizeof(char *));
+
+	if (!argv) {
+		fprintf(stderr, "Failed to allocate linker arguments\n");
+
+		return -1;
+	}
+
+	size_t index = 0;
+
+	argv[index++] = "cc";
+
+	for (size_t i = 0; i < objects->count; i++) {
+		argv[index++] = objects->files[i];
+	}
+
+	argv[index++] = "-o";
+	argv[index++] = artifact;
+	argv[index] = NULL;
+
+	const int result = process_run("cc", argv);
+
+	free(argv);
+
+	return result;
+}
+
+int link_objects(const Manifest *manifest,
+		 const ObjectList *objects,
+		 const char *project_root) {
+	if (!manifest) {
+		fprintf(stderr, "link_objects: manifest is NULL\n");
+
+		return 0;
+	}
+
+	if (!objects) {
+		fprintf(stderr, "link_objects: objects is NULL\n");
+
+		return 0;
+	}
+
+	if (!project_root) {
+		fprintf(stderr, "link_objects: project_root is NULL\n");
+
+		return 0;
+	}
+
+	if (objects->count == 0) {
+		fprintf(stderr, "No object files to link\n");
+
+		return 0;
+	}
+
+	char *artifact = artifact_path(manifest, project_root);
+
+	if (!artifact) return 0;
+
+	char *command_path = command_path_from_artifact(artifact);
+
+	if (!command_path) {
+		free(artifact);
+		return 0;
+	}
+
+	char *command = build_link_command(objects, artifact);
+
+	if (!command) {
+		free(command_path);
+		free(artifact);
+		return 0;
+	}
+
+	if (should_link(objects, artifact, command_path, command)) {
+		printf(BLUE "Linking" RESET "\t\t%s\n", manifest->name);
+
+		const int result = link_artifact(objects, artifact);
+
+		if (result != 0) {
+			fprintf(stderr, "Failed to link %s (exit code %d)\n",
+				manifest->name, result);
+
+			free(command);
+			free(command_path);
+			free(artifact);
+
+			return 0;
+		}
+
+		if (!command_write(command_path, command)) {
+			free(command);
+			free(command_path);
+			free(artifact);
+
+			return 0;
+		}
+	}
+
+	free(command);
+	free(command_path);
+	free(artifact);
+
+	return 1;
+}
