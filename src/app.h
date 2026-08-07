@@ -13,6 +13,8 @@
 #define AUTHOR "tas0dev"
 #define BUILD __DATE__
 
+#define MANIFEST_FILE "craft.toml"
+
 enum Commands {
 	Help,
 	Version,

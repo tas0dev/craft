@@ -8,6 +8,7 @@
 
 #include "app.h"
 #include "cli.h"
+#include "commands/build.h"
 #include "commands/help.h"
 #include "commands/version.h"
 #include <stdio.h>
@@ -23,6 +24,7 @@ int main(const int argc, char **argv) {
 	switch (command) {
 	case Help: print_help(argc, argv); break;
 	case Version: print_version(argc, argv); break;
+	case Build: run_build(argc, argv); break;
 	default:
 		printf(RED "Unknown command: " RESET "%s\n", argv[1]);
 		return 1;

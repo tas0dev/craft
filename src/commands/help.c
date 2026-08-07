@@ -7,7 +7,7 @@
  */
 
 #include "help.h"
-#include "../cli.h"
+#include "cli.h"
 #include <stdio.h>
 
 void print_help(const int argc, char *argv[]) {

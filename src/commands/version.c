@@ -7,7 +7,7 @@
  */
 
 #include "version.h"
-#include "src/app.h"
+#include "app.h"
 #include <stdio.h>
 
 void print_version(const int argc, char *argv[]) {
