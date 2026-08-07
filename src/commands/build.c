@@ -8,6 +8,7 @@
 
 #include "build.h"
 #include "build/manifest.h"
+#include "build/source.h"
 #include "src/cli.h"
 #include <stdio.h>
 #ifndef _WIN32
@@ -54,6 +55,22 @@ int run_build(const int argc, char **argv) {
 	}
 
 	print_manifest(manifest);
+
+	SourceList *sources = source_collect(manifest);
+
+	if (!sources) {
+		fprintf(stderr, "Failed to collect sources\n");
+		manifest_free(manifest);
+		return 1;
+	}
+
+	printf("sources:\n");
+
+	for (size_t i = 0; i < sources->count; i++)
+		printf("\t%s\n", sources->files[i]);
+
+	source_list_free(sources);
+
 	manifest_free(manifest);
 
 	return 0;

@@ -1,0 +1,7 @@
+[project]
+name = "Craft"
+
+[target]
+source_dirs = [
+    "src",
+]
