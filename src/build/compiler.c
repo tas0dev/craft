@@ -134,23 +134,29 @@ static int object_list_add(
 
 static int compile_source(
 	const SourceFile *source,
-	const char *object_path
-) {
+	const char *object_path,
+			  const char *project_root) {
+	char *include_path = path_join(project_root, "src");
+
+	if (!include_path) return -1;
+
 	const char *argv[] = {
 		"cc",
-		"-c",
+		"-I", include_path, "-c",
 		source->path,
 		"-o",
-		(char *)object_path,
-		NULL
-	};
+		object_path,	NULL};
 
 	printf(
 		"Compiling %s\n",
 		source->relative_path
 	);
 
-	return process_run("cc", argv);
+	const int result = process_run("cc", argv);
+
+	free(include_path);
+
+	return result;
 }
 
 ObjectList *compile_sources(
@@ -196,8 +202,7 @@ ObjectList *compile_sources(
 		const int result =
 			compile_source(
 				source,
-				object_path
-			);
+				object_path, project_root);
 
 		if (result != 0) {
 			fprintf(

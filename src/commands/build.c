@@ -12,7 +12,7 @@
 #include "build/manifest.h"
 #include "build/project.h"
 #include "build/source.h"
-#include "src/cli.h"
+#include "cli.h"
 #include <stdio.h>
 #include <stdlib.h>
 #ifndef _WIN32
