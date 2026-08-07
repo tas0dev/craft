@@ -7,6 +7,9 @@ craft = executable('craft',
                    'src/app.c',
                    'src/commands/help.c',
                    'src/commands/version.c',
+                   'src/toml/lexer.c',
+                   'src/toml/parser.c',
+                   'src/toml/toml.c',
                    install : true)
 
 test('test', craft)
