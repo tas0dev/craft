@@ -13,4 +13,11 @@
 #define AUTHOR "tas0dev"
 #define BUILD __DATE__
 
+enum Commands {
+	Help,
+	Unknown
+};
+
+enum Commands match_commands(const char *command);
+
 #endif // CRAFT_APP_H

@@ -9,6 +9,6 @@
 #ifndef CRAFT_HELP_H
 #define CRAFT_HELP_H
 
-void print_help();
+void print_help(int argc, char *argv[]);
 
 #endif // CRAFT_HELP_H
