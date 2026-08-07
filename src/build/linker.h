@@ -12,7 +12,7 @@
 #include "manifest.h"
 
 int link_objects(const Manifest *manifest,
+		 const BuildTarget *target,
 		 const ObjectList *objects,
 		 const char *project_root);
-
 #endif // CRAFT_LINKER_H

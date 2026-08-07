@@ -18,8 +18,6 @@ typedef enum {
 
 typedef struct {
 	char *name;
-	char *cc;
-	char *ld;
 	char **source_dirs;
 	size_t source_dir_count;
 	char **include_dirs;
@@ -30,6 +28,14 @@ typedef struct {
 	size_t ldflags_count;
 	char *linker_script;
 	TargetType target_type;
+} BuildTarget;
+
+typedef struct {
+	char *name;
+	char *cc;
+	char *ld;
+	BuildTarget *targets;
+	size_t target_count;
 } Manifest;
 
 typedef struct {
@@ -40,5 +46,6 @@ typedef struct {
 
 Manifest *manifest_load(const char *path, ManifestError *error);
 void manifest_free(Manifest *manifest);
+BuildTarget *manifest_find_target(const Manifest *manifest, const char *name);
 
 #endif // CRAFT_MANIFEST_H

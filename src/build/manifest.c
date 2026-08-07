@@ -13,6 +13,276 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int load_string_array(const TomlTable *table,
+			     const char *key,
+			     char ***items,
+			     size_t *count,
+			     ManifestError *error) {
+	const TomlValue *value = toml_table_get(table, key);
+
+	if (!value) return 1;
+
+	const TomlArray *array = toml_array(value);
+
+	if (!array) {
+		if (error) {
+			error->line = 0;
+			error->column = 0;
+			error->message = "expected string array";
+		}
+
+		return 0;
+	}
+
+	const size_t length = toml_array_length(array);
+
+	if (length == 0) return 1;
+
+	char **result = calloc(length, sizeof(char *));
+
+	if (!result) {
+		fprintf(stderr, "Failed to allocate manifest array\n");
+		return 0;
+	}
+
+	for (size_t i = 0; i < length; i++) {
+		const TomlValue *item = toml_array_get(array, i);
+
+		const char *string = toml_string(item);
+
+		if (!string) {
+			if (error) {
+				error->line = 0;
+				error->column = 0;
+				error->message = "array must contain strings";
+			}
+
+			for (size_t j = 0; j < i; j++)
+				free(result[j]);
+
+			free(result);
+			return 0;
+		}
+
+		result[i] = malloc(strlen(string) + 1);
+
+		if (!result[i]) {
+			for (size_t j = 0; j < i; j++)
+				free(result[j]);
+
+			free(result);
+
+			fprintf(stderr, "Failed to allocate manifest string\n");
+
+			return 0;
+		}
+
+		strcpy(result[i], string);
+	}
+
+	*items = result;
+	*count = length;
+
+	return 1;
+}
+
+static int load_target(BuildTarget *target,
+		       const char *name,
+		       const TomlTable *table,
+		       ManifestError *error) {
+	target->name = malloc(strlen(name) + 1);
+
+	if (!target->name) {
+		fprintf(stderr, "Failed to allocate target name\n");
+		return 0;
+	}
+
+	strcpy(target->name, name);
+
+	const TomlValue *type_value = toml_table_get(table, "type");
+
+	const char *type = toml_string(type_value);
+
+	if (!type || strcmp(type, "executable") == 0) {
+		target->target_type = Executable;
+	} else if (strcmp(type, "staticlib") == 0) {
+		target->target_type = StaticLibrary;
+	} else if (strcmp(type, "dynlib") == 0) {
+		target->target_type = DynamicLibrary;
+	} else {
+		if (error) {
+			error->line = 0;
+			error->column = 0;
+			error->message = "target.type must be executable, "
+					 "staticlib or dynlib";
+		}
+
+		return 0;
+	}
+
+	if (!load_string_array(table, "source_dirs", &target->source_dirs,
+			       &target->source_dir_count, error))
+		return 0;
+
+	if (!target->source_dirs) {
+		target->source_dir_count = 1;
+
+		target->source_dirs = calloc(1, sizeof(char *));
+
+		if (!target->source_dirs) return 0;
+
+		target->source_dirs[0] = malloc(sizeof("src"));
+
+		if (!target->source_dirs[0]) return 0;
+
+		strcpy(target->source_dirs[0], "src");
+	}
+
+	if (!load_string_array(table, "include_dirs", &target->include_dirs,
+			       &target->include_dir_count, error))
+		return 0;
+
+	if (!target->include_dirs) {
+		target->include_dir_count = 2;
+
+		target->include_dirs = calloc(2, sizeof(char *));
+
+		if (!target->include_dirs) return 0;
+
+		target->include_dirs[0] = malloc(sizeof("src"));
+
+		target->include_dirs[1] = malloc(sizeof("include"));
+
+		if (!target->include_dirs[0] || !target->include_dirs[1])
+			return 0;
+
+		strcpy(target->include_dirs[0], "src");
+
+		strcpy(target->include_dirs[1], "include");
+	}
+
+	if (!load_string_array(table, "cflags", &target->cflags,
+			       &target->cflags_count, error))
+		return 0;
+
+	if (!load_string_array(table, "ldflags", &target->ldflags,
+			       &target->ldflags_count, error))
+		return 0;
+
+	const TomlValue *linker_script_value =
+		toml_table_get(table, "linker_script");
+
+	const char *linker_script = toml_string(linker_script_value);
+
+	if (linker_script) {
+		target->linker_script = malloc(strlen(linker_script) + 1);
+
+		if (!target->linker_script) {
+			fprintf(stderr, "Failed to allocate linker script\n");
+
+			return 0;
+		}
+
+		strcpy(target->linker_script, linker_script);
+	}
+
+	return 1;
+}
+
+static int load_targets(Manifest *manifest,
+			const TomlTable *targets,
+			ManifestError *error) {
+	const TomlValue *type = toml_table_get(targets, "type");
+
+	const TomlValue *source_dirs = toml_table_get(targets, "source_dirs");
+
+	const TomlValue *include_dirs = toml_table_get(targets, "include_dirs");
+
+	const TomlValue *cflags = toml_table_get(targets, "cflags");
+
+	const TomlValue *ldflags = toml_table_get(targets, "ldflags");
+
+	const TomlValue *linker_script =
+		toml_table_get(targets, "linker_script");
+
+	const int implicit_target = type || source_dirs || include_dirs ||
+				    cflags || ldflags || linker_script;
+
+	if (implicit_target) {
+		manifest->target_count = 1;
+
+		manifest->targets = calloc(1, sizeof(BuildTarget));
+
+		if (!manifest->targets) {
+			fprintf(stderr, "Failed to allocate target\n");
+
+			return 0;
+		}
+
+		if (!load_target(&manifest->targets[0], manifest->name, targets,
+				 error)) {
+			return 0;
+		}
+
+		return 1;
+	}
+
+	manifest->target_count = toml_table_length(targets);
+
+	if (manifest->target_count == 0) {
+		if (error) {
+			error->line = 0;
+			error->column = 0;
+			error->message = "at least one target is required";
+		}
+
+		return 0;
+	}
+
+	manifest->targets = calloc(manifest->target_count, sizeof(BuildTarget));
+
+	if (!manifest->targets) {
+		fprintf(stderr, "Failed to allocate targets\n");
+
+		return 0;
+	}
+
+	for (size_t i = 0; i < manifest->target_count; i++) {
+		const char *target_name = toml_table_key(targets, i);
+
+		const TomlValue *target_value = toml_table_value(targets, i);
+
+		if (!target_name || !target_value) {
+			if (error) {
+				error->line = 0;
+				error->column = 0;
+				error->message = "invalid target";
+			}
+
+			return 0;
+		}
+
+		const TomlTable *target_table = toml_table(target_value);
+
+		if (!target_table) {
+			if (error) {
+				error->line = 0;
+				error->column = 0;
+				error->message = "target must be a table";
+			}
+
+			return 0;
+		}
+
+		if (!load_target(&manifest->targets[i], target_name,
+				 target_table, error)) {
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
 Manifest *manifest_load(const char *path, ManifestError *error) {
 	TomlError toml_error;
 
@@ -28,6 +298,7 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 
 	if (!manifest_file) {
 		fprintf(stderr, "Failed to allocate manifest path\n");
+
 		return NULL;
 	}
 
@@ -64,393 +335,78 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 
 	if (!manifest) {
 		fprintf(stderr, "Failed to allocate manifest\n");
+
 		toml_free(document);
 		return NULL;
 	}
 
-	manifest->name =
-		malloc(strlen(name) + 1);
+	manifest->name = malloc(strlen(name) + 1);
 
 	if (!manifest->name) {
 		fprintf(stderr, "Failed to allocate project name\n");
+
 		manifest_free(manifest);
 		toml_free(document);
+
 		return NULL;
 	}
 
 	strcpy(manifest->name, name);
 
-	const char *target_type = toml_get_string(document, "target.type");
-
-	if (!target_type) {
-		manifest->target_type = Executable;
-	} else if (strcmp(target_type, "executable") == 0) {
-		manifest->target_type = Executable;
-	} else if (strcmp(target_type, "staticlib") == 0) {
-		manifest->target_type = StaticLibrary;
-	} else if (strcmp(target_type, "dynlib") == 0) {
-		manifest->target_type = DynamicLibrary;
-	} else {
-		if (error) {
-			error->line = 0;
-			error->column = 0;
-			error->message = "target.type must be executable, "
-					 "staticlib or dynlib";
-		}
-
-		manifest_free(manifest);
-		toml_free(document);
-		return NULL;
-	}
-
 	const char *cc = toml_get_string(document, "toolchain.cc");
 
-	if (!cc)
-		cc = "cc";
+	if (!cc) cc = "cc";
 
-	manifest->cc =
-		malloc(strlen(cc) + 1);
+	manifest->cc = malloc(strlen(cc) + 1);
 
 	if (!manifest->cc) {
 		fprintf(stderr, "Failed to allocate compiler name\n");
+
 		manifest_free(manifest);
 		toml_free(document);
+
 		return NULL;
 	}
 
 	strcpy(manifest->cc, cc);
 
-	const char *ld =
-		toml_get_string(document, "toolchain.ld");
+	const char *ld = toml_get_string(document, "toolchain.ld");
 
-	if (!ld)
-		ld = "cc";
+	if (!ld) ld = "cc";
 
-	manifest->ld =
-		malloc(strlen(ld) + 1);
+	manifest->ld = malloc(strlen(ld) + 1);
 
 	if (!manifest->ld) {
 		fprintf(stderr, "Failed to allocate linker name\n");
+
 		manifest_free(manifest);
 		toml_free(document);
+
 		return NULL;
 	}
 
 	strcpy(manifest->ld, ld);
 
-	const TomlArray *source_dirs =
-		toml_get_array(
-			document,
-			"target.source_dirs"
-		);
+	const TomlTable *targets = toml_get_table(document, "target");
 
-	if (source_dirs) {
-		manifest->source_dir_count =
-			toml_array_length(source_dirs);
-
-		manifest->source_dirs = calloc(
-			manifest->source_dir_count, sizeof(char *));
-
-		if (!manifest->source_dirs) {
-			fprintf(stderr, "Failed to allocate source directories\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
+	if (!targets) {
+		if (error) {
+			error->line = 0;
+			error->column = 0;
+			error->message = "target is required";
 		}
 
-		for (
-			size_t i = 0;
-			i < manifest->source_dir_count;
-			i++
-		) {
-			const TomlValue *value = toml_array_get(source_dirs, i);
+		manifest_free(manifest);
+		toml_free(document);
 
-			const char *source_dir = toml_string(value);
-
-			if (!source_dir) {
-				if (error) {
-					error->line = 0;
-					error->column = 0;
-					error->message =
-						"target.source_dirs must contain strings";
-				}
-
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			manifest->source_dirs[i] =
-				malloc(strlen(source_dir) + 1);
-
-			if (!manifest->source_dirs[i]) {
-				fprintf(stderr, "Failed to allocate source directory\n");
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			strcpy(
-				manifest->source_dirs[i],
-				source_dir
-			);
-		}
-	} else {
-		manifest->source_dir_count = 1;
-
-		manifest->source_dirs =
-			calloc(1, sizeof(char *));
-
-		if (!manifest->source_dirs) {
-			fprintf(stderr,
-				"Failed to allocate source directories\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		manifest->source_dirs[0] =
-			malloc(sizeof("src"));
-
-		if (!manifest->source_dirs[0]) {
-			fprintf(stderr, "Failed to allocate default source "
-					"directory\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		strcpy(
-			manifest->source_dirs[0],
-			"src"
-		);
+		return NULL;
 	}
 
-	const TomlArray *include_dirs =
-		toml_get_array(
-			document,
-			"target.include_dirs");
+	if (!load_targets(manifest, targets, error)) {
+		manifest_free(manifest);
+		toml_free(document);
 
-	if (include_dirs) {
-		manifest->include_dir_count =
-			toml_array_length(include_dirs);
-
-		manifest->include_dirs =
-			calloc(manifest->include_dir_count, sizeof(char *));
-
-		if (!manifest->include_dirs) {
-			fprintf(stderr,
-				"Failed to allocate include directories\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		for (
-			size_t i = 0;
-			i < manifest->include_dir_count;
-			i++
-		) {
-			const TomlValue *value =
-				toml_array_get(include_dirs, i);
-
-			const char *include_dir =
-				toml_string(value);
-
-			if (!include_dir) {
-				if (error) {
-					error->line = 0;
-					error->column = 0;
-					error->message =
-						"target.include_dirs must contain strings";
-				}
-
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			manifest->include_dirs[i] =
-				malloc(strlen(include_dir) + 1);
-
-			if (!manifest->include_dirs[i]) {
-				fprintf(stderr, "Failed to allocate include "
-						"directory\n");
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			strcpy(
-				manifest->include_dirs[i],
-				include_dir
-			);
-		}
-	} else {
-		manifest->include_dir_count = 2;
-
-		manifest->include_dirs =
-			calloc(2, sizeof(char *));
-
-		if (!manifest->include_dirs) {
-			fprintf(stderr, "Failed to allocate include directories\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		manifest->include_dirs[0] =
-			malloc(sizeof("src"));
-
-		manifest->include_dirs[1] =
-			malloc(sizeof("include"));
-
-		if (
-			!manifest->include_dirs[0] ||
-			!manifest->include_dirs[1]) {
-			fprintf(stderr, "Failed to allocate default include "
-					"directories\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		strcpy(
-			manifest->include_dirs[0],
-			"src");
-
-		strcpy(manifest->include_dirs[1],
-			"include"
-		);
-	}
-
-	const TomlArray *cflags =
-		toml_get_array(document, "target.cflags");
-
-	if (cflags) {
-		manifest->cflags_count = toml_array_length(cflags);
-
-		manifest->cflags = calloc(
-			manifest->cflags_count, sizeof(char *));
-
-		if (!manifest->cflags) {
-			fprintf(stderr, "Failed to allocate cflags\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		for (
-			size_t i = 0;
-			i < manifest->cflags_count;
-			i++) {
-			const TomlValue *value = toml_array_get(cflags, i);
-
-			const char *cflag =
-				toml_string(value);
-
-			if (!cflag) {
-				if (error) {
-					error->line = 0;
-					error->column = 0;
-					error->message =
-						"target.cflags must "
-							 "contain strings";
-				}
-
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			manifest->cflags[i] =
-				malloc(strlen(cflag) + 1);
-
-			if (!manifest->cflags[i]) {
-				fprintf(stderr, "Failed to allocate cflag\n");
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			strcpy(
-				manifest->cflags[i],
-				cflag
-			);
-		}
-	}
-
-	const TomlArray *ldflags = toml_get_array(document, "target.ldflags");
-
-	if (ldflags) {
-		manifest->ldflags_count = toml_array_length(ldflags);
-
-		manifest->ldflags =
-			calloc(manifest->ldflags_count, sizeof(char *));
-
-		if (!manifest->ldflags) {
-			fprintf(stderr, "Failed to allocate ldflags\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		for (
-			size_t i = 0;
-			i < manifest->ldflags_count;
-			i++
-		) {
-			const TomlValue *value = toml_array_get(ldflags, i);
-
-			const char *ldflag = toml_string(value);
-
-			if (!ldflag) {
-				if (error) {
-					error->line = 0;
-					error->column = 0;
-					error->message =
-						"target.ldflags must contain strings";
-				}
-
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			manifest->ldflags[i] =
-				malloc(strlen(ldflag) + 1);
-
-			if (!manifest->ldflags[i]) {
-				fprintf(stderr, "Failed to allocate ldflag\n");
-				manifest_free(manifest);
-				toml_free(document);
-				return NULL;
-			}
-
-			strcpy(
-				manifest->ldflags[i],
-				ldflag
-			);
-		}
-	}
-
-	const char *linker_script =
-		toml_get_string(document, "target.linker_script"
-		);
-
-	if (linker_script) {
-		manifest->linker_script = malloc(strlen(linker_script) + 1);
-
-		if (!manifest->linker_script) {
-			fprintf(stderr, "Failed to allocate linker script\n");
-			manifest_free(manifest);
-			toml_free(document);
-			return NULL;
-		}
-
-		strcpy(manifest->linker_script,
-			linker_script
-		);
+		return NULL;
 	}
 
 	toml_free(document);
@@ -464,42 +420,45 @@ void manifest_free(Manifest *manifest) {
 	free(manifest->name);
 	free(manifest->cc);
 	free(manifest->ld);
-	free(manifest->linker_script);
 
-	for (
-		size_t i = 0;
-		i < manifest->source_dir_count;
-		i++
-	) {
-		free(manifest->source_dirs[i]);
+	for (size_t i = 0; i < manifest->target_count; i++) {
+		BuildTarget *target = &manifest->targets[i];
+
+		free(target->name);
+		free(target->linker_script);
+
+		for (size_t j = 0; j < target->source_dir_count; j++)
+			free(target->source_dirs[j]);
+
+		free(target->source_dirs);
+
+		for (size_t j = 0; j < target->include_dir_count; j++)
+			free(target->include_dirs[j]);
+
+		free(target->include_dirs);
+
+		for (size_t j = 0; j < target->cflags_count; j++)
+			free(target->cflags[j]);
+
+		free(target->cflags);
+
+		for (size_t j = 0; j < target->ldflags_count; j++)
+			free(target->ldflags[j]);
+
+		free(target->ldflags);
 	}
 
-	free(manifest->source_dirs);
-
-	for (
-		size_t i = 0;
-		i < manifest->include_dir_count; i++) {
-		free(manifest->include_dirs[i]);
-	}
-
-	free(manifest->include_dirs);
-
-	for (size_t i = 0;
-		i < manifest->cflags_count;
-		i++
-	) {
-		free(manifest->cflags[i]);
-	}
-
-	free(manifest->cflags);
-
-	for (size_t i = 0; i < manifest->ldflags_count;
-		i++
-	) {
-		free(manifest->ldflags[i]);
-	}
-
-	free(manifest->ldflags);
-
+	free(manifest->targets);
 	free(manifest);
+}
+
+BuildTarget *manifest_find_target(const Manifest *manifest, const char *name) {
+	if (!manifest || !name) return NULL;
+
+	for (size_t i = 0; i < manifest->target_count; i++) {
+		if (strcmp(manifest->targets[i].name, name) == 0)
+			return &manifest->targets[i];
+	}
+
+	return NULL;
 }

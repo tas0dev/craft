@@ -16,6 +16,7 @@ typedef struct {
 } ObjectList;
 
 ObjectList *compile_sources(const Manifest *manifest,
+			    const BuildTarget *target,
 			    const SourceList *sources,
 			    const char *project_root);
 

@@ -122,6 +122,7 @@ static int object_list_add(ObjectList *objects, const char *path) {
 }
 
 static char *build_compile_command(const Manifest *manifest,
+				   const BuildTarget *target,
 				   const SourceFile *source,
 				   const char *object_path,
 				   const char *dependency_path,
@@ -130,16 +131,16 @@ static char *build_compile_command(const Manifest *manifest,
 
 	length += strlen(manifest->cc);
 
-	for (size_t i = 0; i < manifest->include_dir_count; i++) {
+	for (size_t i = 0; i < target->include_dir_count; i++) {
 		length += strlen(" -I");
 		length += strlen(project_root);
 		length += 1;
-		length += strlen(manifest->include_dirs[i]);
+		length += strlen(target->include_dirs[i]);
 	}
 
-	for (size_t i = 0; i < manifest->cflags_count; i++) {
+	for (size_t i = 0; i < target->cflags_count; i++) {
 		length += 1;
-		length += strlen(manifest->cflags[i]);
+		length += strlen(target->cflags[i]);
 	}
 
 	length += strlen(" -MMD -MF ");
@@ -153,22 +154,27 @@ static char *build_compile_command(const Manifest *manifest,
 
 	char *command = malloc(length + 1);
 
-	if (!command) return NULL;
+	if (!command) {
+		fprintf(stderr, "Failed to allocate compile command for %s\n",
+			source->relative_path);
+
+		return NULL;
+	}
 
 	command[0] = '\0';
 
 	strcat(command, manifest->cc);
 
-	for (size_t i = 0; i < manifest->include_dir_count; i++) {
+	for (size_t i = 0; i < target->include_dir_count; i++) {
 		strcat(command, " -I");
 		strcat(command, project_root);
 		strcat(command, "/");
-		strcat(command, manifest->include_dirs[i]);
+		strcat(command, target->include_dirs[i]);
 	}
 
-	for (size_t i = 0; i < manifest->cflags_count; i++) {
+	for (size_t i = 0; i < target->cflags_count; i++) {
 		strcat(command, " ");
-		strcat(command, manifest->cflags[i]);
+		strcat(command, target->cflags[i]);
 	}
 
 	strcat(command, " -MMD -MF ");
@@ -354,12 +360,13 @@ static int should_compile(const char *object_path,
 }
 
 static int compile_source(const Manifest *manifest,
+			  const BuildTarget *target,
 			  const SourceFile *source,
 			  const char *object_path,
 			  const char *dependency_path,
 			  const char *project_root) {
-	const size_t argument_count = 1 + manifest->include_dir_count * 2 +
-				      manifest->cflags_count + 8 + 1;
+	const size_t argument_count = 1 + target->include_dir_count * 2 +
+				      target->cflags_count + 8 + 1;
 
 	const char **argv = calloc(argument_count, sizeof(char *));
 
@@ -372,7 +379,7 @@ static int compile_source(const Manifest *manifest,
 	}
 
 	char **include_paths =
-		calloc(manifest->include_dir_count, sizeof(char *));
+		calloc(target->include_dir_count, sizeof(char *));
 
 	if (!include_paths) {
 		fprintf(stderr, "Failed to allocate include paths for %s\n",
@@ -387,15 +394,14 @@ static int compile_source(const Manifest *manifest,
 
 	argv[argument_index++] = manifest->cc;
 
-	for (size_t i = 0; i < manifest->include_dir_count; i++) {
+	for (size_t i = 0; i < target->include_dir_count; i++) {
 		char *include_path =
-			path_join(project_root, manifest->include_dirs[i]);
+			path_join(project_root, target->include_dirs[i]);
 
 		if (!include_path) {
 			fprintf(stderr,
 				"Failed to create include path '%s' for %s\n",
-				manifest->include_dirs[i],
-				source->relative_path);
+				target->include_dirs[i], source->relative_path);
 
 			goto error;
 		}
@@ -406,8 +412,8 @@ static int compile_source(const Manifest *manifest,
 		argv[argument_index++] = include_path;
 	}
 
-	for (size_t i = 0; i < manifest->cflags_count; i++) {
-		argv[argument_index++] = manifest->cflags[i];
+	for (size_t i = 0; i < target->cflags_count; i++) {
+		argv[argument_index++] = target->cflags[i];
 	}
 
 	argv[argument_index++] = "-MMD";
@@ -422,7 +428,7 @@ static int compile_source(const Manifest *manifest,
 
 	argv[argument_index] = NULL;
 
-	printf(GREEN "Compiling" RESET "\t%s\n", source->relative_path);
+	printf(GREEN "Compiling\t" RESET "%s\n", source->relative_path);
 
 	const int result = process_run(manifest->cc, argv);
 
@@ -447,6 +453,7 @@ error:
 }
 
 ObjectList *compile_sources(const Manifest *manifest,
+			    const BuildTarget *target,
 			    const SourceList *sources,
 			    const char *project_root) {
 	if (!manifest) {
@@ -511,9 +518,9 @@ ObjectList *compile_sources(const Manifest *manifest,
 			return NULL;
 		}
 
-		char *command =
-			build_compile_command(manifest, source, object_path,
-					      dependency_path, project_root);
+		char *command = build_compile_command(
+			manifest, target, source, object_path, dependency_path,
+			project_root);
 
 		if (!command) {
 			fprintf(stderr,
@@ -542,9 +549,9 @@ ObjectList *compile_sources(const Manifest *manifest,
 
 		if (should_compile(object_path, dependency_path, command_path,
 				   command)) {
-			const int result =
-				compile_source(manifest, source, object_path,
-					       dependency_path, project_root);
+			const int result = compile_source(
+				manifest, target, source, object_path,
+				dependency_path, project_root);
 
 			if (result != 0) {
 				fprintf(stderr,

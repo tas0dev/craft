@@ -197,19 +197,32 @@ static int collect_directory(SourceList *sources, const char *directory) {
 
 #endif
 
-SourceList *source_collect(const Manifest *manifest, const char *project_root) {
-	if (!manifest || !project_root) return NULL;
+SourceList *source_collect(const BuildTarget *target,
+			   const char *project_root) {
+	if (!target || !project_root) {
+		fprintf(stderr,
+			"source_collect: target or project_root is NULL\n");
+
+		return NULL;
+	}
 
 	SourceList *sources = calloc(1, sizeof(*sources));
 
-	if (!sources) return NULL;
+	if (!sources) {
+		fprintf(stderr, "Failed to allocate source list\n");
 
-	for (size_t i = 0; i < manifest->source_dir_count; i++) {
-		const char *source_dir_name = manifest->source_dirs[i];
+		return NULL;
+	}
+
+	for (size_t i = 0; i < target->source_dir_count; i++) {
+		const char *source_dir_name = target->source_dirs[i];
 
 		char *source_dir = path_join(project_root, source_dir_name);
 
 		if (!source_dir) {
+			fprintf(stderr, "Failed to create source path: %s\n",
+				source_dir_name);
+
 			source_list_free(sources);
 			return NULL;
 		}
@@ -220,6 +233,10 @@ SourceList *source_collect(const Manifest *manifest, const char *project_root) {
 			relative_root = source_dir_name;
 
 		if (!collect_directory(sources, source_dir, relative_root)) {
+			fprintf(stderr,
+				"Failed to collect source directory: %s\n",
+				source_dir);
+
 			free(source_dir);
 			source_list_free(sources);
 			return NULL;

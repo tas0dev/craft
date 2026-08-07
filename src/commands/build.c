@@ -24,10 +24,47 @@
 #include <unistd.h>
 #endif
 
-int run_build(const int argc, char **argv) {
-	(void)argc;
-	(void)argv;
+static int build_target(const Manifest *manifest,
+			const BuildTarget *target,
+			const char *project_root) {
+	SourceList *sources = source_collect(target, project_root);
 
+	if (!sources) {
+		fprintf(stderr,
+			RED "Failed to collect sources for target %s\n" RESET,
+			target->name);
+
+		return 1;
+	}
+
+	ObjectList *objects =
+		compile_sources(manifest, target, sources, project_root);
+
+	if (!objects) {
+		fprintf(stderr, RED "Failed to compile target %s\n" RESET,
+			target->name);
+
+		source_list_free(sources);
+		return 1;
+	}
+
+	if (!link_objects(manifest, target, objects, project_root)) {
+		fprintf(stderr, RED "Failed to link target %s\n" RESET,
+			target->name);
+
+		object_list_free(objects);
+		source_list_free(sources);
+
+		return 1;
+	}
+
+	object_list_free(objects);
+	source_list_free(sources);
+
+	return 0;
+}
+
+int run_build(const int argc, char **argv) {
 	char cwd[4096];
 
 	if (!getcwd(cwd, sizeof(cwd))) {
@@ -63,42 +100,42 @@ int run_build(const int argc, char **argv) {
 		return 1;
 	}
 
-	SourceList *sources = source_collect(manifest, project_root);
+	if (argc >= 3) {
+		const char *target_name = argv[2];
 
-	if (!sources) {
-		fprintf(stderr, RED "Failed to collect sources\n" RESET);
+		BuildTarget *target =
+			manifest_find_target(manifest, target_name);
+
+		if (!target) {
+			fprintf(stderr, RED "Unknown target: " RESET "%s\n",
+				target_name);
+
+			manifest_free(manifest);
+			free(project_root);
+
+			return 1;
+		}
+
+		const int result = build_target(manifest, target, project_root);
 
 		manifest_free(manifest);
 		free(project_root);
 
-		return 1;
+		return result;
 	}
 
-	ObjectList *objects = compile_sources(manifest, sources, project_root);
+	for (size_t i = 0; i < manifest->target_count; i++) {
+		const int result = build_target(manifest, &manifest->targets[i],
+						project_root);
 
-	if (!objects) {
-		fprintf(stderr, RED "Failed to compile sources\n" RESET);
+		if (result != 0) {
+			manifest_free(manifest);
+			free(project_root);
 
-		source_list_free(sources);
-		manifest_free(manifest);
-		free(project_root);
-
-		return 1;
+			return result;
+		}
 	}
 
-	if (!link_objects(manifest, objects, project_root)) {
-		fprintf(stderr, RED "Failed to link project\n" RESET);
-
-		object_list_free(objects);
-		source_list_free(sources);
-		manifest_free(manifest);
-		free(project_root);
-
-		return 1;
-	}
-
-	object_list_free(objects);
-	source_list_free(sources);
 	manifest_free(manifest);
 	free(project_root);
 

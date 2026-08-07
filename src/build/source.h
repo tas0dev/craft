@@ -21,8 +21,7 @@ typedef struct {
 	size_t count;
 } SourceList;
 
-SourceList *source_collect(const Manifest *manifest, const char *project_root);
-
+SourceList *source_collect(const BuildTarget *target, const char *project_root);
 void source_list_free(SourceList *sources);
 
 #endif // CRAFT_SOURCES_H

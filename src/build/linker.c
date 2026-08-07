@@ -7,6 +7,7 @@
  */
 
 #include "linker.h"
+
 #include "cli.h"
 #include "util/process.h"
 #include <errno.h>
@@ -46,7 +47,8 @@ static int create_directory(const char *path) {
 	return errno == EEXIST;
 }
 
-static char *artifact_path(const Manifest *manifest, const char *project_root) {
+static char *artifact_path(const BuildTarget *target,
+			   const char *project_root) {
 	char *target_path = path_join(project_root, "target");
 
 	if (!target_path) return NULL;
@@ -61,69 +63,62 @@ static char *artifact_path(const Manifest *manifest, const char *project_root) {
 
 	char *artifact_name = NULL;
 
-	switch (manifest->target_type) {
+	switch (target->target_type) {
 	case Executable:
 #ifdef _WIN32
 	{
-		const size_t length =
-				strlen(manifest->name) + strlen(".exe") + 1;
+		const size_t length = strlen(target->name) + strlen(".exe") + 1;
 
 		artifact_name = malloc(length);
 
-			if (artifact_name) {
-			snprintf(artifact_name, length, "%s.exe",
-					 manifest->name);
-			}
+		if (artifact_name) {
+			snprintf(artifact_name, length, "%s.exe", target->name);
+		}
 	}
 #else
-		artifact_name = malloc(strlen(manifest->name) + 1);
+		artifact_name = malloc(strlen(target->name) + 1);
 
-		if (artifact_name) strcpy(artifact_name, manifest->name);
+		if (artifact_name) strcpy(artifact_name, target->name);
 #endif
 	break;
 
 	case StaticLibrary: {
-		const size_t length = strlen("lib") + strlen(manifest->name) +
-				      strlen(".a") + 1;
+		const size_t length =
+			strlen("lib") + strlen(target->name) + strlen(".a") + 1;
 
 		artifact_name = malloc(length);
 
 		if (artifact_name) {
 			snprintf(artifact_name, length, "lib%s.a",
-				 manifest->name);
+				 target->name);
 		}
 	} break;
 
 	case DynamicLibrary:
 #ifdef _WIN32
 	{
-		const size_t length =
-			strlen(manifest->name) + strlen(".dll") + 1;
+		const size_t length = strlen(target->name) + strlen(".dll") + 1;
 
 		artifact_name = malloc(length);
 
 		if (artifact_name) {
-			snprintf(artifact_name, length, "%s.dll",
-				 manifest->name);
+			snprintf(artifact_name, length, "%s.dll", target->name);
 		}
 	}
 #else
 	{
-		const size_t length = strlen("lib") + strlen(manifest->name) +
+		const size_t length = strlen("lib") + strlen(target->name) +
 				      strlen(".so") + 1;
 
 		artifact_name = malloc(length);
 
 		if (artifact_name) {
-			snprintf(artifact_name,
-					length,
-					"lib%s.so",
-					manifest->name
-				);
-			}
+			snprintf(artifact_name, length, "lib%s.so",
+				 target->name);
 		}
+	}
 #endif
-		break;
+	break;
 	}
 
 	if (!artifact_name) {
@@ -157,47 +152,41 @@ static char *command_path_from_artifact(const char *artifact) {
 	return path;
 }
 
-static char *build_link_command(
-	const Manifest *manifest,
-	const ObjectList *objects,
-	const char *artifact,
-	const char *project_root
-) {
+static char *build_link_command(const Manifest *manifest,
+				const BuildTarget *target,
+				const ObjectList *objects,
+				const char *artifact,
+				const char *project_root) {
 	const char *program =
-		manifest->target_type ==
-			StaticLibrary ? "ar" : manifest->ld;
+		target->target_type == StaticLibrary ? "ar" : manifest->ld;
 
 	size_t length = strlen(program);
 
-	if (manifest->target_type == StaticLibrary) {
+	if (target->target_type == StaticLibrary) {
 		length += strlen(" rcs ");
 		length += strlen(artifact);
 	} else {
-		if (manifest->target_type == DynamicLibrary
-		) {
+		if (target->target_type == DynamicLibrary)
 			length += strlen(" -shared");
-		}
 
-		for (size_t i = 0; i < manifest->ldflags_count; i++) {
+		for (size_t i = 0; i < target->ldflags_count; i++) {
 			length += 1;
-			length += strlen(manifest->ldflags[i]);
+			length += strlen(target->ldflags[i]);
 		}
 
-		if (manifest->linker_script) {
+		if (target->linker_script) {
 			length += strlen(" -T ");
 			length += strlen(project_root);
 			length += 1;
-			length += strlen(manifest->linker_script);
+			length += strlen(target->linker_script);
 		}
 	}
 
 	for (size_t i = 0; i < objects->count; i++) {
-		length +=
-			1 +
-			strlen(objects->files[i]);
+		length += 1 + strlen(objects->files[i]);
 	}
 
-	if (manifest->target_type != StaticLibrary) {
+	if (target->target_type != StaticLibrary) {
 		length += strlen(" -o ");
 		length += strlen(artifact);
 	}
@@ -214,34 +203,29 @@ static char *build_link_command(
 
 	strcat(command, program);
 
-	if (manifest->target_type == StaticLibrary) {
+	if (target->target_type == StaticLibrary) {
 		strcat(command, " rcs ");
 		strcat(command, artifact);
-	} else if (manifest->target_type ==
-		DynamicLibrary) {
+	} else if (target->target_type == DynamicLibrary) {
 		strcat(command, " -shared");
 	}
 
-	for (size_t i = 0; i < objects->count;
-		i++
-	) {
+	for (size_t i = 0; i < objects->count; i++) {
 		strcat(command, " ");
 		strcat(command, objects->files[i]);
 	}
 
-	if (manifest->target_type != StaticLibrary) {
-		for (size_t i = 0; i < manifest->ldflags_count; i++) {
+	if (target->target_type != StaticLibrary) {
+		for (size_t i = 0; i < target->ldflags_count; i++) {
 			strcat(command, " ");
-			strcat(command, manifest->ldflags[i]
-			);
+			strcat(command, target->ldflags[i]);
 		}
 
-		if (manifest->linker_script) {
+		if (target->linker_script) {
 			strcat(command, " -T ");
 			strcat(command, project_root);
 			strcat(command, "/");
-			strcat(
-				command, manifest->linker_script);
+			strcat(command, target->linker_script);
 		}
 
 		strcat(command, " -o ");
@@ -349,32 +333,19 @@ static int should_link(const ObjectList *objects,
 	return 0;
 }
 
-static int link_artifact(
-	const Manifest *manifest,
-	const ObjectList *objects,
-	const char *artifact,
-	const char *project_root
-) {
-	if (
-		manifest->target_type ==
-		StaticLibrary
-	) {
-		const size_t argument_count =
-			3 +
-			objects->count +
-			1;
+static int link_artifact(const Manifest *manifest,
+			 const BuildTarget *target,
+			 const ObjectList *objects,
+			 const char *artifact,
+			 const char *project_root) {
+	if (target->target_type == StaticLibrary) {
+		const size_t argument_count = 3 + objects->count + 1;
 
-		const char **argv =
-			calloc(
-				argument_count,
-				sizeof(char *)
-			);
+		const char **argv = calloc(argument_count, sizeof(char *));
 
 		if (!argv) {
-			fprintf(
-				stderr,
-				"Failed to allocate archiver arguments\n"
-			);
+			fprintf(stderr,
+				"Failed to allocate archiver arguments\n");
 
 			return -1;
 		}
@@ -399,34 +370,28 @@ static int link_artifact(
 	}
 
 	const size_t linker_script_argument_count =
-		manifest->linker_script ? 2 : 0;
+		target->linker_script ? 2 : 0;
 
 	const size_t dynamic_argument_count =
-		manifest->target_type == DynamicLibrary ? 1 : 0;
+		target->target_type == DynamicLibrary ? 1 : 0;
 
 	const size_t argument_count =
-		1 + objects->count + manifest->ldflags_count +
+		1 + objects->count + target->ldflags_count +
 		linker_script_argument_count + dynamic_argument_count + 2 + 1;
 
-	const char **argv =
-		calloc(
-			argument_count,
-			sizeof(char *)
-		);
+	const char **argv = calloc(argument_count, sizeof(char *));
 
 	if (!argv) {
-		fprintf(
-			stderr,
-			"Failed to allocate linker arguments\n");
+		fprintf(stderr, "Failed to allocate linker arguments\n");
 
 		return -1;
 	}
 
 	char *linker_script_path = NULL;
 
-	if (manifest->linker_script) {
+	if (target->linker_script) {
 		linker_script_path =
-			path_join(project_root, manifest->linker_script);
+			path_join(project_root, target->linker_script);
 
 		if (!linker_script_path) {
 			free(argv);
@@ -438,23 +403,14 @@ static int link_artifact(
 
 	argv[index++] = manifest->ld;
 
-	if (manifest->target_type == DynamicLibrary
-	) {
-		argv[index++] = "-shared";
+	if (target->target_type == DynamicLibrary) argv[index++] = "-shared";
+
+	for (size_t i = 0; i < objects->count; i++) {
+		argv[index++] = objects->files[i];
 	}
 
-	for (size_t i = 0; i < objects->count;
-		i++
-	) {
-		argv[index++] =
-			objects->files[i];
-	}
-
-	for (
-		size_t i = 0;
-		i < manifest->ldflags_count;
-		i++) {
-		argv[index++] = manifest->ldflags[i];
+	for (size_t i = 0; i < target->ldflags_count; i++) {
+		argv[index++] = target->ldflags[i];
 	}
 
 	if (linker_script_path) {
@@ -475,10 +431,17 @@ static int link_artifact(
 }
 
 int link_objects(const Manifest *manifest,
+		 const BuildTarget *target,
 		 const ObjectList *objects,
 		 const char *project_root) {
 	if (!manifest) {
 		fprintf(stderr, "link_objects: manifest is NULL\n");
+
+		return 0;
+	}
+
+	if (!target) {
+		fprintf(stderr, "link_objects: target is NULL\n");
 
 		return 0;
 	}
@@ -496,12 +459,13 @@ int link_objects(const Manifest *manifest,
 	}
 
 	if (objects->count == 0) {
-		fprintf(stderr, "No object files to link\n");
+		fprintf(stderr, "No object files to link for target %s\n",
+			target->name);
 
 		return 0;
 	}
 
-	char *artifact = artifact_path(manifest, project_root);
+	char *artifact = artifact_path(target, project_root);
 
 	if (!artifact) return 0;
 
@@ -512,13 +476,8 @@ int link_objects(const Manifest *manifest,
 		return 0;
 	}
 
-	char *command =
-		build_link_command(
-			manifest,
-			objects,
-			artifact,
-			project_root
-		);
+	char *command = build_link_command(manifest, target, objects, artifact,
+					   project_root);
 
 	if (!command) {
 		free(command_path);
@@ -527,19 +486,14 @@ int link_objects(const Manifest *manifest,
 	}
 
 	if (should_link(objects, artifact, command_path, command)) {
-		printf(BLUE "Linking" RESET "\t\t%s\n", manifest->name);
+		printf(BLUE "Linking\t\t" RESET "%s\n", target->name);
 
-		const int result =
-			link_artifact(
-				manifest,
-				objects,
-				artifact,
-				project_root
-			);
+		const int result = link_artifact(manifest, target, objects,
+						 artifact, project_root);
 
 		if (result != 0) {
 			fprintf(stderr, "Failed to link %s (exit code %d)\n",
-				manifest->name, result);
+				target->name, result);
 
 			free(command);
 			free(command_path);
