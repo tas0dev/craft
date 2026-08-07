@@ -88,6 +88,17 @@ craft clean
 
 `target/` 以下のビルド生成物を削除します。
 
+### インストール
+
+ターゲットを現在のユーザー向けにインストールできます。
+
+```sh
+craft install
+```
+
+Windowsでは、 `%LOCALAPPDATA%\Microsoft\WindowsApps\XXX.exe`
+Linuxでは、`$HOME/.local/bin/XXX`にインストールされます。
+
 ### ターゲット一覧を表示
 
 ```sh

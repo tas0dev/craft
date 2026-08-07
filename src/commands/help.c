@@ -21,6 +21,9 @@ void print_help(const int argc, char *argv[]) {
 		    "\t" GREEN "run" RESET
 		    "\t[target]\tBuild and run an executable target\n"
 		    "\t" GREEN "clean" RESET "\t\t\tRemove build artifacts\n"
+		    "\t" GREEN "targets" RESET "\t\t\tList project targets\n"
+		    "\t" GREEN "install" RESET
+		    "\t\t\tInstall Craft for the current user\n"
 		    "\t" GREEN "version" RESET "\t\t\tPrint Craft version\n"
 		    "\t" GREEN "help" RESET "\t\t\tPrint this help\n"
 		    "\n" BLUE "Options:\n" RESET "\t" GREEN "-h" RESET
