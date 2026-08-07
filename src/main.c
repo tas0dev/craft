@@ -21,8 +21,10 @@ int main(const int argc, char **argv) {
 
 	if (command == Help) print_help(argc, argv);
 
-	if (command == Unknown)
+	if (command == Unknown) {
 		printf(RED "Unknown command: " RESET "%s\n", argv[1]);
+		return 1;
+	}
 
 	return 0;
 }
