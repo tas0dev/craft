@@ -124,21 +124,36 @@ static char *build_compile_command(const Manifest *manifest,
 				   const char *object_path,
 				   const char *dependency_path,
 				   const char *project_root) {
-	size_t length = strlen("cc") + strlen(source->path) +
-			strlen(object_path) + strlen(dependency_path) + 32;
+	size_t length = 0;
+
+	length += strlen("cc");
 
 	for (size_t i = 0; i < manifest->include_dir_count; i++) {
-		length += strlen(project_root) +
-			  strlen(manifest->include_dirs[i]) + 8;
+		length += strlen(" -I");
+		length += strlen(project_root);
+		length += 1;
+		length += strlen(manifest->include_dirs[i]);
 	}
 
 	for (size_t i = 0; i < manifest->cflags_count; i++) {
-		length += strlen(manifest->cflags[i]) + 1;
+		length += 1;
+		length += strlen(manifest->cflags[i]);
 	}
 
-	char *command = calloc(length + 1, 1);
+	length += strlen(" -MMD -MF ");
+	length += strlen(dependency_path);
+
+	length += strlen(" -c ");
+	length += strlen(source->path);
+
+	length += strlen(" -o ");
+	length += strlen(object_path);
+
+	char *command = malloc(length + 1);
 
 	if (!command) return NULL;
+
+	command[0] = '\0';
 
 	strcat(command, "cc");
 
@@ -333,15 +348,24 @@ static int compile_source(const Manifest *manifest,
 	const size_t argument_count = 1 + manifest->include_dir_count * 2 +
 				      manifest->cflags_count + 8 + 1;
 
-	const char **argv = calloc(argument_count, sizeof(char *)
-		);
+	const char **argv = calloc(argument_count, sizeof(char *));
 
-	if (!argv) return -1;
+	if (!argv) {
+		fprintf(stderr,
+			"Failed to allocate compiler arguments for %s\n",
+			source->relative_path);
+
+		return -1;
+	}
 
 	char **include_paths =
 		calloc(manifest->include_dir_count, sizeof(char *));
 
 	if (!include_paths) {
+		fprintf(
+			stderr, "Failed to allocate include paths for %s\n",
+			source->relative_path);
+
 		free(argv);
 		return -1;
 	}
@@ -352,13 +376,21 @@ static int compile_source(const Manifest *manifest,
 	argv[argument_index++] = "cc";
 
 	for (
-		size_t i = 0; i < manifest->include_dir_count; i++) {
+		size_t i = 0;
+		i < manifest->include_dir_count; i++) {
 		char *include_path =
 			path_join(
-				project_root, manifest->include_dirs[i]);
+				project_root,
+				manifest->include_dirs[i]);
 
-		if (!include_path)
+		if (!include_path) {
+			fprintf(stderr,
+				"Failed to create include path '%s' for %s\n",
+				manifest->include_dirs[i],
+				source->relative_path);
+
 			goto error;
+		}
 
 		include_paths[include_index++] = include_path;
 
@@ -368,7 +400,9 @@ static int compile_source(const Manifest *manifest,
 
 	for (
 		size_t i = 0;
-		i < manifest->cflags_count; i++) {
+		i < manifest->cflags_count;
+		i++
+	) {
 		argv[argument_index++] = manifest->cflags[i];
 	}
 
@@ -386,11 +420,13 @@ static int compile_source(const Manifest *manifest,
 
 	printf(
 		"Compiling %s\n",
-		source->relative_path);
+		source->relative_path
+	);
 
 	const int result = process_run("cc", argv);
 
-	for (size_t i = 0; i < include_index; i++) {
+	for (size_t i = 0; i < include_index; i++
+	) {
 		free(include_paths[i]);
 	}
 
@@ -399,51 +435,87 @@ static int compile_source(const Manifest *manifest,
 
 	return result;
 
-	error:
-		for (
-			size_t i = 0;
-			i < include_index; i++) {
-			free(include_paths[i]);
-		}
+error:
+	for (
+		size_t i = 0;
+		i < include_index;
+		i++) {
+		free(include_paths[i]);
+	}
 
-		free(include_paths);
-		free(argv);
+	free(include_paths);
+	free(argv);
 
-		return -1;
+	return -1;
 }
 
 ObjectList *compile_sources(const Manifest *manifest,
-			    const SourceList *sources,
+	const SourceList *sources,
 			    const char *project_root) {
-	if (!manifest || !sources || !project_root) { return NULL; }
+	if (!manifest) {
+		fprintf(stderr, "compile_sources: manifest is NULL\n");
+		return NULL;
+	}
+
+	if (!sources) {
+		fprintf(stderr, "compile_sources: sources is NULL\n");
+		return NULL;
+	}
+
+	if (!project_root) {
+		fprintf(stderr, "compile_sources: project_root is NULL\n");
+		return NULL;
+	}
 
 	ObjectList *objects = calloc(1, sizeof(*objects));
 
-	if (!objects) return NULL;
+	if (!objects) {
+		fprintf(stderr, "Failed to allocate object list\n");
+		return NULL;
+	}
 
 	for (size_t i = 0; i < sources->count; i++) {
-		const SourceFile *source = &sources->files[i];
+		const SourceFile *source =
+			&sources->files[i];
 
 		char *object_path =
-			object_path_from_source(project_root, source);
+			object_path_from_source(project_root,
+				source
+			);
 
 		if (!object_path) {
+			fprintf(stderr, "Failed to create object path for %s\n",
+				source->relative_path);
+
 			object_list_free(objects);
 			return NULL;
 		}
 
 		char *dependency_path =
-			dependency_path_from_object(object_path);
+			dependency_path_from_object(
+				object_path
+			);
 
 		if (!dependency_path) {
+			fprintf(stderr,
+				"Failed to create dependency path for %s\n",
+				source->relative_path);
+
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
 		}
 
-		char *command_path = command_path_from_object(object_path);
+		char *command_path =
+			command_path_from_object(
+				object_path
+			);
 
 		if (!command_path) {
+			fprintf(stderr,
+				"Failed to create command path for %s\n",
+				source->relative_path);
+
 			free(dependency_path);
 			free(object_path);
 			object_list_free(objects);
@@ -451,10 +523,19 @@ ObjectList *compile_sources(const Manifest *manifest,
 		}
 
 		char *command =
-			build_compile_command(manifest, source, object_path,
-					      dependency_path, project_root);
+			build_compile_command(
+				manifest,
+				source,
+				object_path,
+				dependency_path,
+				project_root);
 
 		if (!command) {
+			fprintf(stderr,
+				"Failed to build compile command for %s\n",
+				source->relative_path
+			);
+
 			free(command_path);
 			free(dependency_path);
 			free(object_path);
@@ -463,6 +544,12 @@ ObjectList *compile_sources(const Manifest *manifest,
 		}
 
 		if (!create_parent_directories(object_path)) {
+			fprintf(
+				stderr,
+				"Failed to create parent directories for %s\n",
+				object_path
+			);
+
 			free(command);
 			free(command_path);
 			free(dependency_path);
@@ -471,15 +558,26 @@ ObjectList *compile_sources(const Manifest *manifest,
 			return NULL;
 		}
 
-		if (should_compile(object_path, dependency_path, command_path,
-				   command)) {
+		if (
+			should_compile(
+				object_path,
+				dependency_path,
+				command_path,
+				command
+			)
+		) {
 			const int result =
 				compile_source(manifest, source, object_path,
-					       dependency_path, project_root);
+					       dependency_path,
+					project_root
+				);
 
 			if (result != 0) {
-				fprintf(stderr, "Failed to compile %s\n",
-					source->relative_path);
+				fprintf(stderr,
+					"Failed to compile %s (exit code %d)\n",
+					source->relative_path,
+					result
+				);
 
 				free(command);
 				free(command_path);
@@ -489,8 +587,14 @@ ObjectList *compile_sources(const Manifest *manifest,
 				return NULL;
 			}
 
-			if (!command_write(command_path, command)) {
-				fprintf(stderr,
+			if (
+				!command_write(
+					command_path,
+					command
+				)
+			) {
+				fprintf(
+					stderr,
 					"Failed to write compile state for "
 					"%s\n",
 					source->relative_path);
@@ -504,7 +608,17 @@ ObjectList *compile_sources(const Manifest *manifest,
 			}
 		}
 
-		if (!object_list_add(objects, object_path)) {
+		if (
+			!object_list_add(
+				objects,
+				object_path
+			)
+		) {
+			fprintf(
+				stderr,
+				"Failed to add object %s\n",
+				object_path);
+
 			free(command);
 			free(command_path);
 			free(dependency_path);
