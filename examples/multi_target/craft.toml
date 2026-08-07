@@ -1,0 +1,13 @@
+[project]
+name = "StaticLibraryTest"
+
+[target.app]
+include_dirs = [
+    "testlib"
+]
+
+[target.testlib]
+type = "staticlib"
+source_dirs = [
+    "testlib"
+]
