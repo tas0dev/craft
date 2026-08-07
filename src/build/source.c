@@ -88,8 +88,7 @@ static int collect_directory(SourceList *sources,
 	if (handle == INVALID_HANDLE_VALUE) return 0;
 
 	do {
-		if (
-			strcmp(entry.cFileName, ".") == 0 ||
+		if (strcmp(entry.cFileName, ".") == 0 ||
 		    strcmp(entry.cFileName, "..") == 0) {
 			continue;
 		}
@@ -125,12 +124,9 @@ static int collect_directory(SourceList *sources,
 				free(path);
 				FindClose(handle);
 				return 0;
-			    }
+			}
 		} else if (is_source_file(path)) {
-			if (!source_list_add(
-				    sources,
-				    path,
-				    relative_path)) {
+			if (!source_list_add(sources, path, relative_path)) {
 				free(relative_path);
 				free(path);
 				FindClose(handle);
@@ -201,10 +197,7 @@ static int collect_directory(SourceList *sources, const char *directory) {
 
 #endif
 
-SourceList *source_collect(
-	const Manifest *manifest,
-	const char *project_root
-) {
+SourceList *source_collect(const Manifest *manifest, const char *project_root) {
 	if (!manifest || !project_root) return NULL;
 
 	SourceList *sources = calloc(1, sizeof(*sources));
@@ -239,8 +232,7 @@ SourceList *source_collect(
 }
 
 void source_list_free(SourceList *sources) {
-	if (!sources)
-		return;
+	if (!sources) return;
 
 	for (size_t i = 0; i < sources->count; i++) {
 		free(sources->files[i].path);

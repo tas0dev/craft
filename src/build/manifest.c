@@ -140,6 +140,77 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 		strcpy(manifest->source_dirs[0], "src");
 	}
 
+	const TomlArray *include_dirs =
+		toml_get_array(document, "target.include_dirs");
+
+	if (include_dirs) {
+		manifest->include_dir_count = toml_array_length(include_dirs);
+
+		manifest->include_dirs =
+			calloc(manifest->include_dir_count, sizeof(char *));
+
+		if (!manifest->include_dirs) {
+			manifest_free(manifest);
+			toml_free(document);
+			return NULL;
+		}
+
+		for (size_t i = 0; i < manifest->include_dir_count; i++) {
+			const TomlValue *value =
+				toml_array_get(include_dirs, i);
+
+			const char *include_dir = toml_string(value);
+
+			if (!include_dir) {
+				if (error) {
+					error->line = 0;
+					error->column = 0;
+					error->message = "target.include_dirs "
+							 "must contain strings";
+				}
+
+				manifest_free(manifest);
+				toml_free(document);
+				return NULL;
+			}
+
+			manifest->include_dirs[i] =
+				malloc(strlen(include_dir) + 1);
+
+			if (!manifest->include_dirs[i]) {
+				manifest_free(manifest);
+				toml_free(document);
+				return NULL;
+			}
+
+			strcpy(manifest->include_dirs[i], include_dir);
+		}
+	} else {
+		manifest->include_dir_count = 2;
+
+		manifest->include_dirs = calloc(2, sizeof(char *));
+
+		if (!manifest->include_dirs) {
+			manifest_free(manifest);
+			toml_free(document);
+			return NULL;
+		}
+
+		manifest->include_dirs[0] = malloc(sizeof("src"));
+
+		manifest->include_dirs[1] = malloc(sizeof("include"));
+
+		if (!manifest->include_dirs[0] || !manifest->include_dirs[1]) {
+			manifest_free(manifest);
+			toml_free(document);
+			return NULL;
+		}
+
+		strcpy(manifest->include_dirs[0], "src");
+
+		strcpy(manifest->include_dirs[1], "include");
+	}
+
 	toml_free(document);
 
 	return manifest;

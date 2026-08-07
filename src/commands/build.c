@@ -47,9 +47,7 @@ int run_build(const int argc, char **argv) {
 	Manifest *manifest = manifest_load(project_root, &error);
 
 	if (!manifest) {
-		fprintf(
-			stderr,
-			RED "Failed to load manifest" RESET);
+		fprintf(stderr, RED "Failed to load manifest" RESET);
 
 		if (error.message) fprintf(stderr, ": %s", error.message);
 

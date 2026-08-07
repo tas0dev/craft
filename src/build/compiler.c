@@ -90,11 +90,9 @@ static char *object_path_from_source(const char *project_root,
 
 	char *extension = strrchr(relative, '.');
 
-	if (extension)
-		strcpy(extension, ".o");
+	if (extension) strcpy(extension, ".o");
 
-	char *object_path =
-		path_join(build_root, relative);
+	char *object_path = path_join(build_root, relative);
 
 	free(relative);
 	free(build_root);
@@ -102,91 +100,103 @@ static char *object_path_from_source(const char *project_root,
 	return object_path;
 }
 
-static int object_list_add(
-	ObjectList *objects,
-	const char *path
-) {
-	char **files = realloc(
-		objects->files,
-		(objects->count + 1) * sizeof(char *)
-	);
+static int object_list_add(ObjectList *objects, const char *path) {
+	char **files =
+		realloc(objects->files, (objects->count + 1) * sizeof(char *));
 
-	if (!files)
-		return 0;
+	if (!files) return 0;
 
 	objects->files = files;
 
-	objects->files[objects->count] =
-		malloc(strlen(path) + 1);
+	objects->files[objects->count] = malloc(strlen(path) + 1);
 
-	if (!objects->files[objects->count])
-		return 0;
+	if (!objects->files[objects->count]) return 0;
 
-	strcpy(
-		objects->files[objects->count],
-		path
-	);
+	strcpy(objects->files[objects->count], path);
 
 	objects->count++;
 
 	return 1;
 }
 
-static int compile_source(
-	const SourceFile *source,
-	const char *object_path,
+static int compile_source(const Manifest *manifest,
+			  const SourceFile *source,
+			  const char *object_path,
 			  const char *project_root) {
-	char *include_path = path_join(project_root, "src");
+	const size_t argument_count =
+		1 + manifest->include_dir_count * 2 + 4 + 1;
 
-	if (!include_path) return -1;
+	const char **argv = calloc(argument_count, sizeof(char *));
 
-	const char *argv[] = {
-		"cc",
-		"-I", include_path, "-c",
-		source->path,
-		"-o",
-		object_path,	NULL};
+	if (!argv) return -1;
 
-	printf(
-		"Compiling %s\n",
-		source->relative_path
-	);
+	char **include_paths =
+		calloc(manifest->include_dir_count, sizeof(char *));
+
+	if (!include_paths) {
+		free(argv);
+		return -1;
+	}
+
+	size_t argument_index = 0;
+	size_t include_index = 0;
+
+	argv[argument_index++] = "cc";
+
+	for (size_t i = 0; i < manifest->include_dir_count; i++) {
+		char *include_path =
+			path_join(project_root, manifest->include_dirs[i]);
+
+		if (!include_path) goto error;
+
+		include_paths[include_index++] = include_path;
+
+		argv[argument_index++] = "-I";
+		argv[argument_index++] = include_path;
+	}
+
+	argv[argument_index++] = "-c";
+	argv[argument_index++] = source->path;
+	argv[argument_index++] = "-o";
+	argv[argument_index++] = object_path;
+	argv[argument_index] = NULL;
+
+	printf("Compiling %s\n", source->relative_path);
 
 	const int result = process_run("cc", argv);
 
-	free(include_path);
+	for (size_t i = 0; i < include_index; i++)
+		free(include_paths[i]);
+
+	free(include_paths);
+	free(argv);
 
 	return result;
+
+error:
+	for (size_t i = 0; i < include_index; i++)
+		free(include_paths[i]);
+
+	free(include_paths);
+	free(argv);
+
+	return -1;
 }
 
-ObjectList *compile_sources(
-	const Manifest *manifest,
-	const SourceList *sources,
-	const char *project_root
-) {
-	if (
-		!manifest ||
-		!sources ||
-		!project_root
-	) {
-		return NULL;
-	}
+ObjectList *compile_sources(const Manifest *manifest,
+			    const SourceList *sources,
+			    const char *project_root) {
+	if (!manifest || !sources || !project_root) { return NULL; }
 
-	ObjectList *objects =
-		calloc(1, sizeof(*objects));
+	ObjectList *objects = calloc(1, sizeof(*objects));
 
-	if (!objects)
-		return NULL;
+	if (!objects) return NULL;
 
 	for (size_t i = 0; i < sources->count; i++) {
-		const SourceFile *source =
-			&sources->files[i];
+		const SourceFile *source = &sources->files[i];
 
 		char *object_path =
-			object_path_from_source(
-				project_root,
-				source
-			);
+			object_path_from_source(project_root, source);
 
 		if (!object_path) {
 			object_list_free(objects);
@@ -199,27 +209,19 @@ ObjectList *compile_sources(
 			return NULL;
 		}
 
-		const int result =
-			compile_source(
-				source,
-				object_path, project_root);
+		const int result = compile_source(manifest, source, object_path,
+						  project_root);
 
 		if (result != 0) {
-			fprintf(
-				stderr,
-				"Failed to compile %s\n",
-				source->relative_path
-			);
+			fprintf(stderr, "Failed to compile %s\n",
+				source->relative_path);
 
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
 		}
 
-		if (!object_list_add(
-			    objects,
-			    object_path
-		    )) {
+		if (!object_list_add(objects, object_path)) {
 			free(object_path);
 			object_list_free(objects);
 			return NULL;
@@ -231,11 +233,8 @@ ObjectList *compile_sources(
 	return objects;
 }
 
-void object_list_free(
-	ObjectList *objects
-) {
-	if (!objects)
-		return;
+void object_list_free(ObjectList *objects) {
+	if (!objects) return;
 
 	for (size_t i = 0; i < objects->count; i++)
 		free(objects->files[i]);
