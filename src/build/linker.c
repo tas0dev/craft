@@ -531,7 +531,7 @@ int link_objects(const Manifest *manifest,
 	}
 
 	if (should_link(objects, artifact, command_path, command)) {
-		printf(BLUE "Linking\t\t" RESET "%s\n", target->name);
+		printf(BLUE "Linking\t\t\t" RESET "%s\n", target->name);
 
 		const int result = link_artifact(manifest, target, objects,
 						 artifact, project_root);
