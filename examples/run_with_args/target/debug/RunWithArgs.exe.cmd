@@ -1,0 +1,1 @@
+cc C:\Users\jin.dev\Develop\craft\examples\run_with_args/target/debug/build/RunWithArgs/main.o -o C:\Users\jin.dev\Develop\craft\examples\run_with_args/target/debug/RunWithArgs.exe

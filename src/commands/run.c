@@ -91,6 +91,51 @@ static char *artifact_path(const BuildTarget *target,
 	return path;
 }
 
+static int parse_run_arguments(const int argc,
+			       char **argv,
+			       const char **target_name,
+			       BuildProfile *profile,
+			       int *argument_start) {
+	*target_name = NULL;
+	*profile = Debug;
+	*argument_start = argc;
+
+	for (int i = 2; i < argc; i++) {
+		if (strcmp(argv[i], "--") == 0) {
+			*argument_start = i + 1;
+			return 1;
+		}
+
+		if (strcmp(argv[i], "--release") == 0) {
+			*profile = Release;
+			continue;
+		}
+
+		if (strcmp(argv[i], "--debug") == 0) {
+			*profile = Debug;
+			continue;
+		}
+
+		if (argv[i][0] == '-') {
+			fprintf(stderr, RED "Unknown option: " RESET "%s\n",
+				argv[i]);
+
+			return 0;
+		}
+
+		if (*target_name) {
+			fprintf(stderr,
+				RED "Multiple targets specified\n" RESET);
+
+			return 0;
+		}
+
+		*target_name = argv[i];
+	}
+
+	return 1;
+}
+
 static BuildTarget *find_runnable_target(const Manifest *manifest) {
 	BuildTarget *result = NULL;
 
@@ -127,33 +172,11 @@ int run_run(const int argc, char **argv) {
 
 	const char *target_name = NULL;
 	BuildProfile profile = Debug;
+	int argument_start = argc;
 
-	for (int i = 2; i < argc; i++) {
-		if (strcmp(argv[i], "--release") == 0) {
-			profile = Release;
-			continue;
-		}
-
-		if (strcmp(argv[i], "--debug") == 0) {
-			profile = Debug;
-			continue;
-		}
-
-		if (argv[i][0] == '-') {
-			fprintf(stderr, RED "Unknown option: " RESET "%s\n",
-				argv[i]);
-
-			return 1;
-		}
-
-		if (target_name) {
-			fprintf(stderr,
-				RED "Multiple targets specified\n" RESET);
-
-			return 1;
-		}
-
-		target_name = argv[i];
+	if (!parse_run_arguments(argc, argv, &target_name, &profile,
+				 &argument_start)) {
+		return 1;
 	}
 
 	char *project_root = project_find_root(cwd);
@@ -167,19 +190,19 @@ int run_run(const int argc, char **argv) {
 
 	ManifestError error = {0};
 
-	Manifest *manifest = manifest_load(
-			project_root,
-			&error
-		);
+	Manifest *manifest =
+		manifest_load(project_root, &error);
 
 	if (!manifest) {
-		fprintf(stderr, RED "Failed to load manifest" RESET);
+		fprintf(stderr,
+			RED "Failed to load manifest" RESET);
 
-		if (error.message)
-			fprintf(stderr, ": %s", error.message);
+		if (error.message) fprintf(stderr, ": %s", error.message);
 
 		if (error.line != 0) {
-			fprintf(stderr, " (%zu:%zu)", error.line, error.column);
+			fprintf(stderr,
+				" (%zu:%zu)",
+				error.line, error.column);
 		}
 
 		fputc('\n', stderr);
@@ -198,7 +221,8 @@ int run_run(const int argc, char **argv) {
 			);
 
 		if (!target) {
-			fprintf(stderr, RED "Unknown target: " RESET "%s\n",
+			fprintf(stderr,
+				RED "Unknown target: " RESET "%s\n",
 				target_name);
 
 			manifest_free(manifest);
@@ -218,10 +242,7 @@ int run_run(const int argc, char **argv) {
 			return 1;
 		}
 	} else {
-		target =
-			find_runnable_target(
-				manifest
-			);
+		target = find_runnable_target(manifest);
 
 		if (!target) {
 			manifest_free(manifest);
@@ -232,8 +253,7 @@ int run_run(const int argc, char **argv) {
 	}
 
 	char *build_argv[5];
-
-	size_t build_argc = 0;
+	int build_argc = 0;
 
 	build_argv[build_argc++] = argv[0];
 	build_argv[build_argc++] = "build";
@@ -246,16 +266,17 @@ int run_run(const int argc, char **argv) {
 
 	build_argv[build_argc] = NULL;
 
-	if (run_build((int)build_argc, build_argv) != 0) {
+	if (run_build(build_argc, build_argv) != 0) {
 		manifest_free(manifest);
 		free(project_root);
 
 		return 1;
 	}
 
-	char *artifact = artifact_path(target, project_root,
-			profile
-		);
+	char *artifact =
+		artifact_path(
+			target,
+			project_root, profile);
 
 	if (!artifact) {
 		manifest_free(manifest);
@@ -264,18 +285,41 @@ int run_run(const int argc, char **argv) {
 		return 1;
 	}
 
-	const char *run_argv[] = {artifact,
-		NULL
-	};
+	const int forwarded_count =
+		argc - argument_start;
 
-	const int result =
-		process_run(
-			artifact,
-			run_argv
-		);
+	const size_t run_argument_count = 1 + (size_t)forwarded_count + 1;
+
+	const char **run_argv = calloc(run_argument_count, sizeof(char *));
+
+	if (!run_argv) {
+		fprintf(stderr, RED "Failed to allocate run arguments\n" RESET);
+
+		free(artifact);
+		manifest_free(manifest);
+		free(project_root);
+
+		return 1;
+	}
+
+	size_t run_argument_index = 0;
+
+	run_argv[run_argument_index++] = artifact;
+
+	for (int i = argument_start; i < argc; i++) {
+		run_argv[run_argument_index++] = argv[i];
+	}
+
+	run_argv[run_argument_index] = NULL;
+
+	const int result = process_run(artifact, run_argv);
+
+	free(run_argv);
 
 	if (result == -1) {
-		fprintf(stderr, RED "Failed to run %s\n" RESET, target->name);
+		fprintf(stderr,
+			RED "Failed to run %s\n" RESET,
+			target->name);
 
 		free(artifact);
 		manifest_free(manifest);
