@@ -23,6 +23,7 @@ craft = executable('craft',
                    'src/toml/parser.c',
                    'src/toml/toml.c',
                    'src/util/process.c',
+                   'src/util/thread.c',
                    include_directories : include,
                    install : true
 )

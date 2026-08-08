@@ -113,10 +113,7 @@ int run_build(const int argc, char **argv) {
 	char cwd[4096];
 
 	if (!getcwd(cwd, sizeof(cwd))) {
-		fprintf(
-			stderr,
-			RED "Failed to get current directory\n" RESET
-		);
+		fprintf(stderr, RED "Failed to get current directory\n" RESET);
 
 		return 1;
 	}
@@ -124,25 +121,19 @@ int run_build(const int argc, char **argv) {
 	char *project_root = project_find_root(cwd);
 
 	if (!project_root) {
-		fprintf(
-			stderr, RED "Could not find " MANIFEST_FILE "\n" RESET
-		);
+		fprintf(stderr, RED "Could not find " MANIFEST_FILE "\n" RESET);
 
 		return 1;
 	}
 
 	ManifestError error = {0};
 
-	Manifest *manifest = manifest_load(project_root,
-			&error
-		);
+	Manifest *manifest = manifest_load(project_root, &error);
 
 	if (!manifest) {
 		fprintf(stderr, RED "Failed to load manifest" RESET);
 
-		if (error.message)
-			fprintf(
-				stderr, ": %s", error.message);
+		if (error.message) fprintf(stderr, ": %s", error.message);
 
 		if (error.line != 0) {
 			fprintf(stderr, " (%zu:%zu)", error.line, error.column);
@@ -155,13 +146,10 @@ int run_build(const int argc, char **argv) {
 	}
 
 	unsigned char *states =
-		calloc(manifest->target_count, sizeof(unsigned char)
-		);
+		calloc(manifest->target_count, sizeof(unsigned char));
 
 	if (!states) {
-		fprintf(
-			stderr,
-			RED "Failed to allocate build state\n" RESET);
+		fprintf(stderr, RED "Failed to allocate build state\n" RESET);
 
 		manifest_free(manifest);
 		free(project_root);
@@ -174,8 +162,7 @@ int run_build(const int argc, char **argv) {
 
 		if (!target) {
 			fprintf(stderr, RED "Unknown target: " RESET "%s\n",
-				argv[2]
-			);
+				argv[2]);
 
 			free(states);
 			manifest_free(manifest);
@@ -195,12 +182,8 @@ int run_build(const int argc, char **argv) {
 	}
 
 	for (size_t i = 0; i < manifest->target_count; i++) {
-		if (build_target_recursive(manifest,
-				&manifest->targets[i],
-				project_root,
-				states
-			) != 0
-		) {
+		if (build_target_recursive(manifest, &manifest->targets[i],
+					   project_root, states) != 0) {
 			free(states);
 			manifest_free(manifest);
 			free(project_root);

@@ -93,16 +93,14 @@ static int load_target(BuildTarget *target,
 	target->name = malloc(strlen(name) + 1);
 
 	if (!target->name) {
-		fprintf(stderr, "Failed to allocate target name\n"
-		);
+		fprintf(stderr, "Failed to allocate target name\n");
 
 		return 0;
 	}
 
 	strcpy(target->name, name);
 
-	const TomlValue *type_value = toml_table_get(table, "type"
-		);
+	const TomlValue *type_value = toml_table_get(table, "type");
 
 	const char *type = toml_string(type_value);
 
@@ -116,8 +114,7 @@ static int load_target(BuildTarget *target,
 		if (error) {
 			error->line = 0;
 			error->column = 0;
-			error->message =
-				"target.type must be executable, "
+			error->message = "target.type must be executable, "
 					 "staticlib or dynlib";
 		}
 
@@ -132,8 +129,7 @@ static int load_target(BuildTarget *target,
 	if (!target->source_dirs) {
 		target->source_dir_count = 1;
 
-		target->source_dirs =
-			calloc(1, sizeof(char *));
+		target->source_dirs = calloc(1, sizeof(char *));
 
 		if (!target->source_dirs) return 0;
 
@@ -144,8 +140,7 @@ static int load_target(BuildTarget *target,
 		strcpy(target->source_dirs[0], "src");
 	}
 
-	if (!load_string_array(table, "include_dirs",
-			&target->include_dirs,
+	if (!load_string_array(table, "include_dirs", &target->include_dirs,
 			       &target->include_dir_count, error)) {
 		return 0;
 	}
@@ -153,8 +148,7 @@ static int load_target(BuildTarget *target,
 	if (!target->include_dirs) {
 		target->include_dir_count = 2;
 
-		target->include_dirs =
-			calloc(2, sizeof(char *));
+		target->include_dirs = calloc(2, sizeof(char *));
 
 		if (!target->include_dirs) return 0;
 
@@ -172,22 +166,17 @@ static int load_target(BuildTarget *target,
 	}
 
 	if (!load_string_array(table, "cflags", &target->cflags,
-			       &target->cflags_count, error)
-	) {
+			       &target->cflags_count, error)) {
 		return 0;
 	}
 
 	if (!load_string_array(table, "ldflags", &target->ldflags,
-			       &target->ldflags_count,
-			error
-		)
-	) {
+			       &target->ldflags_count, error)) {
 		return 0;
 	}
 
 	if (!load_string_array(table, "dependencies", &target->dependencies,
-			       &target->dependency_count,
-			error)) {
+			       &target->dependency_count, error)) {
 		return 0;
 	}
 
@@ -200,14 +189,12 @@ static int load_target(BuildTarget *target,
 		target->linker_script = malloc(strlen(linker_script) + 1);
 
 		if (!target->linker_script) {
-			fprintf(stderr,
-				"Failed to allocate linker script\n");
+			fprintf(stderr, "Failed to allocate linker script\n");
 
 			return 0;
 		}
 
-		strcpy(target->linker_script, linker_script
-		);
+		strcpy(target->linker_script, linker_script);
 	}
 
 	return 1;
@@ -439,18 +426,13 @@ Manifest *manifest_load(const char *path, ManifestError *error) {
 }
 
 void manifest_free(Manifest *manifest) {
-	if (!manifest)
-		return;
+	if (!manifest) return;
 
 	free(manifest->name);
 	free(manifest->cc);
 	free(manifest->ld);
 
-	for (
-		size_t i = 0;
-		i < manifest->target_count;
-		i++
-	) {
+	for (size_t i = 0; i < manifest->target_count; i++) {
 		BuildTarget *target = &manifest->targets[i];
 
 		free(target->name);
@@ -462,36 +444,25 @@ void manifest_free(Manifest *manifest) {
 
 		free(target->source_dirs);
 
-		for (
-			size_t j = 0;
-			j < target->include_dir_count; j++) {
+		for (size_t j = 0; j < target->include_dir_count; j++) {
 			free(target->include_dirs[j]);
 		}
 
 		free(target->include_dirs);
 
-		for (
-			size_t j = 0;
-			j < target->cflags_count; j++) {
+		for (size_t j = 0; j < target->cflags_count; j++) {
 			free(target->cflags[j]);
 		}
 
 		free(target->cflags);
 
-		for (
-			size_t j = 0;
-			j < target->ldflags_count;
-			j++
-		) {
+		for (size_t j = 0; j < target->ldflags_count; j++) {
 			free(target->ldflags[j]);
 		}
 
 		free(target->ldflags);
 
-		for (size_t j = 0;
-			j < target->dependency_count;
-			j++
-		) {
+		for (size_t j = 0; j < target->dependency_count; j++) {
 			free(target->dependencies[j]);
 		}
 

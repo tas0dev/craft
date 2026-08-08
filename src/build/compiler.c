@@ -7,9 +7,9 @@
  */
 
 #include "build/compiler.h"
-
 #include "cli.h"
 #include "util/process.h"
+#include "util/thread.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +25,19 @@ typedef struct {
 	char **items;
 	size_t count;
 } IncludeList;
+
+typedef struct {
+	const Manifest *manifest;
+	const BuildTarget *target;
+	const SourceFile *source;
+	const char *project_root;
+	char *object_path;
+	char *dependency_path;
+	char *command_path;
+	char *command;
+	int needs_compile;
+	int result;
+} CompileJob;
 
 static char *path_join(const char *left, const char *right) {
 	const size_t length = strlen(left) + 1 + strlen(right) + 1;
@@ -84,6 +97,15 @@ static int include_list_add(IncludeList *list, const char *path) {
 	list->count++;
 
 	return 1;
+}
+
+static void compile_job_free(CompileJob *job) {
+	if (!job) return;
+
+	free(job->object_path);
+	free(job->dependency_path);
+	free(job->command_path);
+	free(job->command);
 }
 
 static int collect_target_includes(const Manifest *manifest,
@@ -171,29 +193,70 @@ static int create_parent_directories(const char *path) {
 	return 1;
 }
 
-static char *object_path_from_source(const char *project_root,
+static char *object_path_from_source(const BuildTarget *target,
+				     const char *project_root,
 				     const SourceFile *source) {
 	char *build_root = path_join(project_root, "target/build");
 
-	if (!build_root) return NULL;
+	if (!build_root) {
+		fprintf(stderr, "Failed to create build root for %s\n",
+			source->relative_path);
+
+		return NULL;
+	}
+
+	char *target_build_root = path_join(build_root, target->name);
+
+	free(build_root);
+
+	if (!target_build_root) {
+		fprintf(stderr, "Failed to create target build root for %s\n",
+			target->name);
+
+		return NULL;
+	}
 
 	char *relative = malloc(strlen(source->relative_path) + 1);
 
 	if (!relative) {
-		free(build_root);
+		fprintf(stderr,
+			"Failed to allocate relative object path for %s\n",
+			source->relative_path);
+
+		free(target_build_root);
 		return NULL;
 	}
 
-	strcpy(relative, source->relative_path);
+	strcpy(
+		relative,
+		source->relative_path
+	);
 
 	char *extension = strrchr(relative, '.');
 
-	if (extension) strcpy(extension, ".o");
+	if (!extension) {
+		fprintf(stderr, "Source file has no extension: %s\n",
+			source->relative_path);
 
-	char *object_path = path_join(build_root, relative);
+		free(relative);
+		free(target_build_root);
+
+		return NULL;
+	}
+
+	strcpy(extension, ".o");
+
+	char *object_path = path_join(target_build_root, relative);
 
 	free(relative);
-	free(build_root);
+	free(target_build_root);
+
+	if (!object_path) {
+		fprintf(stderr, "Failed to create object path for %s\n",
+			source->relative_path);
+
+		return NULL;
+	}
 
 	return object_path;
 }
@@ -217,12 +280,11 @@ static int object_list_add(ObjectList *objects, const char *path) {
 	return 1;
 }
 
-static char *build_compile_command(
-	const Manifest *manifest,
-	const BuildTarget *target,
-	const SourceFile *source,
-	const char *object_path,
-	const char *dependency_path,
+static char *build_compile_command(const Manifest *manifest,
+				   const BuildTarget *target,
+				   const SourceFile *source,
+				   const char *object_path,
+				   const char *dependency_path,
 				   const char *project_root) {
 	IncludeList includes = {0};
 
@@ -253,15 +315,11 @@ static char *build_compile_command(
 	length += strlen(" -o ");
 	length += strlen(object_path);
 
-	char *command =
-		malloc(length + 1);
+	char *command = malloc(length + 1);
 
 	if (!command) {
-		fprintf(
-			stderr,
-			"Failed to allocate compile command for %s\n",
-			source->relative_path
-		);
+		fprintf(stderr, "Failed to allocate compile command for %s\n",
+			source->relative_path);
 
 		include_list_free(&includes);
 		return NULL;
@@ -273,16 +331,12 @@ static char *build_compile_command(
 
 	for (size_t i = 0; i < includes.count; i++) {
 		strcat(command, " -I");
-		strcat(command, includes.items[i]
-		);
+		strcat(command, includes.items[i]);
 	}
 
-	for (
-		size_t i = 0;
-		i < target->cflags_count; i++) {
+	for (size_t i = 0; i < target->cflags_count; i++) {
 		strcat(command, " ");
-		strcat(command, target->cflags[i]
-		);
+		strcat(command, target->cflags[i]);
 	}
 
 	strcat(command, " -MMD -MF ");
@@ -394,6 +448,94 @@ static int command_write(const char *command_path, const char *command) {
 	return written == length;
 }
 
+static int compile_source(const Manifest *manifest,
+			  const BuildTarget *target,
+			  const SourceFile *source,
+			  const char *object_path,
+			  const char *dependency_path,
+			  const char *project_root) {
+	IncludeList includes = {0};
+
+	if (!collect_target_includes(manifest, target, project_root,
+				     &includes)) {
+		include_list_free(&includes);
+		return -1;
+	}
+
+	const size_t argument_count =
+		1 + includes.count * 2 + target->cflags_count + 8 + 1;
+
+	const char **argv = calloc(argument_count, sizeof(char *));
+
+	if (!argv) {
+		fprintf(stderr,
+			"Failed to allocate compiler arguments for %s\n",
+			source->relative_path);
+
+		include_list_free(&includes);
+		return -1;
+	}
+
+	size_t argument_index = 0;
+
+	argv[argument_index++] = manifest->cc;
+
+	for (size_t i = 0; i < includes.count; i++) {
+		argv[argument_index++] = "-I";
+		argv[argument_index++] = includes.items[i];
+	}
+
+	for (size_t i = 0; i < target->cflags_count; i++) {
+		argv[argument_index++] = target->cflags[i];
+	}
+
+	argv[argument_index++] = "-MMD";
+	argv[argument_index++] = "-MF";
+	argv[argument_index++] = dependency_path;
+
+	argv[argument_index++] = "-c";
+	argv[argument_index++] = source->path;
+
+	argv[argument_index++] = "-o";
+	argv[argument_index++] = object_path;
+
+	argv[argument_index] = NULL;
+
+	printf(GREEN "Compiling" RESET "\t\t%s\n", source->relative_path);
+
+	const int result = process_run(manifest->cc, argv);
+
+	free(argv);
+	include_list_free(&includes);
+
+	return result;
+}
+
+static int compile_job_run(void *argument) {
+	CompileJob *job = (CompileJob *)argument;
+
+	const int result = compile_source(
+		job->manifest, job->target, job->source, job->object_path,
+		job->dependency_path, job->project_root);
+
+	if (result != 0) {
+		job->result = result;
+		return result;
+	}
+
+	if (!command_write(job->command_path, job->command)) {
+		fprintf(stderr, "Failed to write compile state for %s\n",
+			job->source->relative_path);
+
+		job->result = -1;
+		return -1;
+	}
+
+	job->result = 0;
+
+	return 0;
+}
+
 static char *dependency_path_from_object(const char *object_path) {
 	char *path = malloc(strlen(object_path) + 1);
 
@@ -469,97 +611,31 @@ static int should_compile(const char *object_path,
 	return 0;
 }
 
-static int compile_source(
-	const Manifest *manifest,
-	const BuildTarget *target,
-	const SourceFile *source,
-	const char *object_path,
-	const char *dependency_path,
-	const char *project_root
-) {
-	IncludeList includes = {0};
-
-	if (!collect_target_includes(manifest, target, project_root,
-				     &includes)) {
-		include_list_free(&includes);
-		return -1;
-	}
-
-	const size_t argument_count =
-		1 + includes.count * 2 + target->cflags_count + 8 + 1;
-
-	const char **argv = calloc(argument_count, sizeof(char *));
-
-	if (!argv) {
-		fprintf(stderr,
-			"Failed to allocate compiler arguments for %s\n",
-			source->relative_path);
-
-		include_list_free(&includes);
-		return -1;
-	}
-
-	size_t argument_index = 0;
-
-	argv[argument_index++] = manifest->cc;
-
-	for (
-		size_t i = 0;
-		i < includes.count; i++
-	) {
-		argv[argument_index++] = "-I";
-		argv[argument_index++] = includes.items[i];
-	}
-
-	for (size_t i = 0; i < target->cflags_count;
-		i++
-	) {
-		argv[argument_index++] = target->cflags[i];
-	}
-
-	argv[argument_index++] = "-MMD";
-	argv[argument_index++] = "-MF";
-	argv[argument_index++] = dependency_path;
-
-	argv[argument_index++] = "-c";
-	argv[argument_index++] = source->path;
-
-	argv[argument_index++] = "-o";
-	argv[argument_index++] = object_path;
-
-	argv[argument_index] = NULL;
-
-	printf(
-		GREEN "Compiling" RESET "\t%s\n", source->relative_path);
-
-	const int result =
-		process_run(
-			manifest->cc,
-			argv
-		);
-
-	free(argv);
-	include_list_free(&includes);
-
-	return result;
-}
-
 ObjectList *compile_sources(const Manifest *manifest,
 			    const BuildTarget *target,
 			    const SourceList *sources,
 			    const char *project_root) {
 	if (!manifest) {
 		fprintf(stderr, "compile_sources: manifest is NULL\n");
+
+		return NULL;
+	}
+
+	if (!target) {
+		fprintf(stderr, "compile_sources: target is NULL\n");
+
 		return NULL;
 	}
 
 	if (!sources) {
 		fprintf(stderr, "compile_sources: sources is NULL\n");
+
 		return NULL;
 	}
 
 	if (!project_root) {
 		fprintf(stderr, "compile_sources: project_root is NULL\n");
+
 		return NULL;
 	}
 
@@ -567,131 +643,194 @@ ObjectList *compile_sources(const Manifest *manifest,
 
 	if (!objects) {
 		fprintf(stderr, "Failed to allocate object list\n");
+
+		return NULL;
+	}
+
+	CompileJob *jobs = calloc(sources->count, sizeof(*jobs));
+
+	if (!jobs) {
+		fprintf(stderr, "Failed to allocate compile jobs\n");
+
+		object_list_free(objects);
 		return NULL;
 	}
 
 	for (size_t i = 0; i < sources->count; i++) {
-		const SourceFile *source = &sources->files[i];
+		CompileJob *job = &jobs[i];
 
-		char *object_path =
-			object_path_from_source(project_root, source);
+		job->manifest = manifest;
+		job->target = target;
+		job->source = &sources->files[i];
+		job->project_root = project_root;
 
-		if (!object_path) {
+		job->object_path = object_path_from_source(target, project_root,
+							   job->source);
+
+		if (!job->object_path) {
 			fprintf(stderr, "Failed to create object path for %s\n",
-				source->relative_path);
+				job->source->relative_path);
 
-			object_list_free(objects);
-			return NULL;
+			goto error;
 		}
 
-		char *dependency_path =
-			dependency_path_from_object(object_path);
+		job->dependency_path =
+			dependency_path_from_object(job->object_path);
 
-		if (!dependency_path) {
+		if (!job->dependency_path) {
 			fprintf(stderr,
 				"Failed to create dependency path for %s\n",
-				source->relative_path);
+				job->source->relative_path);
 
-			free(object_path);
-			object_list_free(objects);
-			return NULL;
+			goto error;
 		}
 
-		char *command_path = command_path_from_object(object_path);
+		job->command_path = command_path_from_object(job->object_path);
 
-		if (!command_path) {
+		if (!job->command_path) {
 			fprintf(stderr,
 				"Failed to create command path for %s\n",
-				source->relative_path);
+				job->source->relative_path);
 
-			free(dependency_path);
-			free(object_path);
-			object_list_free(objects);
-			return NULL;
+			goto error;
 		}
 
-		char *command = build_compile_command(
-			manifest, target, source, object_path, dependency_path,
-			project_root);
+		job->command = build_compile_command(
+			manifest, target, job->source, job->object_path,
+			job->dependency_path, project_root);
 
-		if (!command) {
+		if (!job->command) {
 			fprintf(stderr,
 				"Failed to build compile command for %s\n",
-				source->relative_path);
+				job->source->relative_path);
 
-			free(command_path);
-			free(dependency_path);
-			free(object_path);
-			object_list_free(objects);
-			return NULL;
+			goto error;
 		}
 
-		if (!create_parent_directories(object_path)) {
+		if (!create_parent_directories(job->object_path)) {
 			fprintf(stderr,
-				"Failed to create parent directories for %s\n",
-				object_path);
+				"Failed to create build directories for %s\n",
+				job->source->relative_path);
 
-			free(command);
-			free(command_path);
-			free(dependency_path);
-			free(object_path);
-			object_list_free(objects);
-			return NULL;
+			goto error;
 		}
 
-		if (should_compile(object_path, dependency_path, command_path,
-				   command)) {
-			const int result = compile_source(
-				manifest, target, source, object_path,
-				dependency_path, project_root);
+		job->needs_compile =
+			should_compile(job->object_path, job->dependency_path,
+				       job->command_path, job->command);
 
-			if (result != 0) {
-				fprintf(stderr,
-					"Failed to compile %s (exit code %d)\n",
-					source->relative_path, result);
-
-				free(command);
-				free(command_path);
-				free(dependency_path);
-				free(object_path);
-				object_list_free(objects);
-				return NULL;
-			}
-
-			if (!command_write(command_path, command)) {
-				fprintf(stderr,
-					"Failed to write compile state for "
-					"%s\n",
-					source->relative_path);
-
-				free(command);
-				free(command_path);
-				free(dependency_path);
-				free(object_path);
-				object_list_free(objects);
-				return NULL;
-			}
-		}
-
-		if (!object_list_add(objects, object_path)) {
+		if (!object_list_add(objects, job->object_path)) {
 			fprintf(stderr, "Failed to add object %s\n",
-				object_path);
+				job->object_path);
 
-			free(command);
-			free(command_path);
-			free(dependency_path);
-			free(object_path);
-			object_list_free(objects);
-			return NULL;
+			goto error;
 		}
-
-		free(command);
-		free(command_path);
-		free(dependency_path);
-		free(object_path);
 	}
 
+	size_t maximum_threads = thread_cpu_count();
+
+	if (maximum_threads == 0) maximum_threads = 1;
+
+	Thread **threads = calloc(maximum_threads, sizeof(*threads));
+
+	CompileJob **active_jobs =
+		calloc(maximum_threads, sizeof(*active_jobs));
+
+	if (!threads || !active_jobs) {
+		fprintf(stderr, "Failed to allocate worker threads\n");
+
+		free(threads);
+		free(active_jobs);
+
+		goto error;
+	}
+
+	size_t active_count = 0;
+
+	for (size_t i = 0; i < sources->count; i++) {
+		CompileJob *job = &jobs[i];
+
+		if (!job->needs_compile) continue;
+
+		Thread *thread = thread_create(compile_job_run, job);
+
+		if (!thread) {
+			fprintf(stderr, "Failed to start compile job for %s\n",
+				job->source->relative_path);
+
+			for (size_t j = 0; j < active_count; j++) {
+				thread_join(threads[j]);
+			}
+
+			free(active_jobs);
+			free(threads);
+
+			goto error;
+		}
+
+		threads[active_count] = thread;
+
+		active_jobs[active_count] = job;
+
+		active_count++;
+
+		if (active_count == maximum_threads) {
+			for (size_t j = 0; j < active_count; j++) {
+				const int result = thread_join(threads[j]);
+
+				if (result != 0) {
+					fprintf(stderr,
+						"Failed to compile %s (exit "
+						"code %d)\n",
+						active_jobs[j]
+							->source->relative_path,
+						result);
+
+					free(active_jobs);
+					free(threads);
+
+					goto error;
+				}
+			}
+
+			active_count = 0;
+		}
+	}
+
+	for (size_t i = 0; i < active_count; i++) {
+		const int result = thread_join(threads[i]);
+
+		if (result != 0) {
+			fprintf(stderr, "Failed to compile %s (exit code %d)\n",
+				active_jobs[i]->source->relative_path, result);
+
+			free(active_jobs);
+			free(threads);
+
+			goto error;
+		}
+	}
+
+	free(active_jobs);
+	free(threads);
+
+	for (size_t i = 0; i < sources->count; i++) {
+		compile_job_free(&jobs[i]);
+	}
+
+	free(jobs);
+
 	return objects;
+
+error:
+	for (size_t i = 0; i < sources->count; i++) {
+		compile_job_free(&jobs[i]);
+	}
+
+	free(jobs);
+	object_list_free(objects);
+
+	return NULL;
 }
 
 void object_list_free(ObjectList *objects) {
