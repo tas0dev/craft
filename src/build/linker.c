@@ -652,7 +652,7 @@ int link_objects(const Manifest *manifest,
 			target,
 			objects, artifact, command_path,
 			command, project_root, profile)) {
-		printf(BLUE "Linking\t\t" RESET "%s\n", target->name);
+		printf(BLUE "Linking\t\t\t" RESET "%s\n", target->name);
 
 		if (verbose) {
 			printf("%s\n", command);
