@@ -29,9 +29,11 @@
 static int parse_build_arguments(const int argc,
 				 char **argv,
 				 const char **target_name,
-				 BuildProfile *profile) {
+				 BuildProfile *profile,
+				 int *verbose) {
 	*target_name = NULL;
 	*profile = Debug;
+	*verbose = 0;
 
 	for (int i = 2; i < argc; i++) {
 		if (strcmp(argv[i], "--release") == 0) {
@@ -41,6 +43,11 @@ static int parse_build_arguments(const int argc,
 
 		if (strcmp(argv[i], "--debug") == 0) {
 			*profile = Debug;
+			continue;
+		}
+
+		if (strcmp(argv[i], "--verbose") == 0) {
+			*verbose = 1;
 			continue;
 		}
 
@@ -67,7 +74,8 @@ static int parse_build_arguments(const int argc,
 static int build_target(const Manifest *manifest,
 			const BuildTarget *target,
 			const char *project_root,
-			const BuildProfile *profile) {
+			const BuildProfile *profile,
+			const int verbose) {
 	SourceList *sources = source_collect(target, project_root);
 
 	if (!sources) {
@@ -80,17 +88,20 @@ static int build_target(const Manifest *manifest,
 
 	ObjectList *objects =
 		compile_sources(manifest, target, sources,
-					      project_root, *profile);
+					      project_root, *profile, verbose);
 
 	if (!objects) {
-		fprintf(stderr, RED "Failed to compile target %s\n" RESET,
+		fprintf(stderr,
+			RED "Failed to compile target %s\n" RESET,
 			target->name);
 
 		source_list_free(sources);
 		return 1;
 	}
 
-	if (!link_objects(manifest, target, objects, project_root, *profile)) {
+	if (!link_objects(
+		    manifest, target, objects, project_root, *profile,
+			  verbose)) {
 		fprintf(stderr, RED "Failed to link target %s\n" RESET,
 			target->name);
 
@@ -98,7 +109,7 @@ static int build_target(const Manifest *manifest,
 		source_list_free(sources);
 
 		return 1;
-	}
+	    }
 
 	object_list_free(objects);
 	source_list_free(sources);
@@ -110,7 +121,8 @@ static int build_target_recursive(const Manifest *manifest,
 				  const BuildTarget *target,
 				  const char *project_root,
 				  unsigned char *states,
-				  const BuildProfile *profile) {
+				  const BuildProfile *profile,
+				  const int verbose) {
 	const size_t target_index = (size_t)(target - manifest->targets);
 
 	if (states[target_index] == 2) return 0;
@@ -126,11 +138,16 @@ static int build_target_recursive(const Manifest *manifest,
 
 	states[target_index] = 1;
 
-	for (size_t i = 0; i < target->dependency_count; i++) {
+	for (
+		size_t i = 0;
+		i < target->dependency_count;
+		i++
+	) {
 		const char *dependency_name = target->dependencies[i];
 
 		BuildTarget *dependency =
-			manifest_find_target(manifest, dependency_name);
+			manifest_find_target(manifest, dependency_name
+			);
 
 		if (!dependency) {
 			fprintf(stderr, RED "Unknown dependency: " RESET "%s\n",
@@ -139,13 +156,18 @@ static int build_target_recursive(const Manifest *manifest,
 			return 1;
 		}
 
-		if (build_target_recursive(manifest, dependency, project_root,
-					   states, profile) != 0) {
+		if (build_target_recursive(manifest,
+				dependency,
+				project_root,
+				states, profile, verbose) != 0) {
 			return 1;
 		}
 	}
 
-	if (build_target(manifest, target, project_root, profile) != 0) {
+	if (build_target(manifest, target, project_root, profile,
+			verbose
+		) != 0
+	) {
 		return 1;
 	}
 
@@ -158,15 +180,22 @@ int run_build(const int argc, char **argv) {
 	char cwd[4096];
 
 	if (!getcwd(cwd, sizeof(cwd))) {
-		fprintf(stderr, RED "Failed to get current directory\n" RESET);
+		fprintf(stderr,
+			RED "Failed to get current directory\n" RESET);
 
 		return 1;
 	}
 
 	const char *target_name = NULL;
 	BuildProfile profile = Debug;
+	int verbose = 0;
 
-	if (!parse_build_arguments(argc, argv, &target_name, &profile)) {
+	if (!parse_build_arguments(
+		    argc,
+		    argv,
+		    &target_name,
+		    &profile,
+		    &verbose)) {
 		return 1;
 	}
 
@@ -180,19 +209,16 @@ int run_build(const int argc, char **argv) {
 
 	ManifestError error = {0};
 
-	Manifest *manifest =
-		manifest_load(project_root, &error);
+	Manifest *manifest = manifest_load(project_root, &error);
 
 	if (!manifest) {
-		fprintf(stderr, RED "Failed to load manifest" RESET);
+		fprintf(stderr,
+			RED "Failed to load manifest" RESET);
 
-		if (error.message)
-			fprintf(stderr, ": %s", error.message);
+		if (error.message) fprintf(stderr, ": %s", error.message);
 
 		if (error.line != 0) {
-			fprintf(stderr,
-				" (%zu:%zu)",
-				error.line, error.column);
+			fprintf(stderr, " (%zu:%zu)", error.line, error.column);
 		}
 
 		fputc('\n', stderr);
@@ -203,11 +229,11 @@ int run_build(const int argc, char **argv) {
 
 	unsigned char *states =
 		calloc(
-			manifest->target_count,
-			sizeof(unsigned char));
+			manifest->target_count, sizeof(unsigned char));
 
 	if (!states) {
-		fprintf(stderr, RED "Failed to allocate build state\n" RESET);
+		fprintf(stderr,
+			RED "Failed to allocate build state\n" RESET);
 
 		manifest_free(manifest);
 		free(project_root);
@@ -220,9 +246,9 @@ int run_build(const int argc, char **argv) {
 			manifest_find_target(manifest, target_name);
 
 		if (!target) {
-			fprintf(stderr, RED "Unknown target: " RESET "%s\n",
-				target_name
-			);
+			fprintf(stderr,
+				RED "Unknown target: " RESET "%s\n",
+				target_name);
 
 			free(states);
 			manifest_free(manifest);
@@ -232,10 +258,11 @@ int run_build(const int argc, char **argv) {
 		}
 
 		const int result =
-			build_target_recursive(
-				manifest,
-				target,
-				project_root, states, &profile);
+			build_target_recursive(manifest, target, project_root,
+					       states,
+				&profile,
+				verbose
+			);
 
 		free(states);
 		manifest_free(manifest);
@@ -246,14 +273,15 @@ int run_build(const int argc, char **argv) {
 
 	for (
 		size_t i = 0;
-		i < manifest->target_count;
-		i++
-	) {
-		if (
-			build_target_recursive(
-				manifest, &manifest->targets[i],
-					   project_root, states,
-					   &profile) != 0) {
+		i < manifest->target_count; i++) {
+		if (build_target_recursive(manifest,
+				&manifest->targets[i],
+				project_root,
+				states,
+				&profile,
+				verbose
+			) != 0
+		) {
 			free(states);
 			manifest_free(manifest);
 			free(project_root);

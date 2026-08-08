@@ -590,7 +590,8 @@ int link_objects(const Manifest *manifest,
 		 const BuildTarget *target,
 		 const ObjectList *objects,
 		 const char *project_root,
-		 const BuildProfile profile) {
+		 const BuildProfile profile,
+		 const int verbose) {
 	if (!manifest) {
 		fprintf(stderr, "link_objects: manifest is NULL\n");
 
@@ -633,7 +634,9 @@ int link_objects(const Manifest *manifest,
 		return 0;
 	}
 
-	char *command = build_link_command(manifest, target, objects, artifact,
+	char *command =
+		build_link_command(
+			manifest, target, objects, artifact,
 					   project_root, profile);
 
 	if (!command) {
@@ -643,17 +646,29 @@ int link_objects(const Manifest *manifest,
 		return 0;
 	}
 
-	if (should_link(manifest, target, objects, artifact, command_path,
+	if (
+		should_link(
+			manifest,
+			target,
+			objects, artifact, command_path,
 			command, project_root, profile)) {
-		printf(BLUE "Linking\t\t\t" RESET "%s\n", target->name);
+		printf(BLUE "Linking\t\t" RESET "%s\n", target->name);
+
+		if (verbose) {
+			printf("%s\n", command);
+			fflush(stdout);
+		}
 
 		const int result =
-			link_artifact(manifest, target, objects, artifact,
-				      project_root, profile);
+			link_artifact(manifest, target,
+				objects,
+				artifact,
+				project_root, profile);
 
 		if (result != 0) {
 			fprintf(stderr, "Failed to link %s (exit code %d)\n",
-				target->name, result);
+				target->name,
+				result);
 
 			free(command);
 			free(command_path);
@@ -662,7 +677,11 @@ int link_objects(const Manifest *manifest,
 			return 0;
 		}
 
-		if (!command_write(command_path, command)) {
+		if (!command_write(
+				command_path,
+				command
+			)
+		) {
 			free(command);
 			free(command_path);
 			free(artifact);

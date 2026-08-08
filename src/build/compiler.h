@@ -20,7 +20,8 @@ ObjectList *compile_sources(const Manifest *manifest,
 			    const BuildTarget *target,
 			    const SourceList *sources,
 			    const char *project_root,
-			    BuildProfile profile);
+			    BuildProfile profile,
+			    int verbose);
 
 void object_list_free(ObjectList *objects);
 #endif // CRAFT_COMPILER_H

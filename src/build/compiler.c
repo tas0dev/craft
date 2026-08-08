@@ -39,6 +39,7 @@ typedef struct {
 	int needs_compile;
 	int result;
 	BuildProfile profile;
+	int verbose;
 } CompileJob;
 
 static char *path_join(const char *left, const char *right) {
@@ -569,6 +570,11 @@ static int compile_source(const Manifest *manifest,
 static int compile_job_run(void *argument) {
 	CompileJob *job = argument;
 
+	if (job->verbose) {
+		printf("%s\n", job->command);
+		fflush(stdout);
+	}
+
 	const int result = compile_source(
 		job->manifest, job->target, job->source, job->object_path,
 		job->dependency_path, job->project_root, job->profile);
@@ -578,13 +584,14 @@ static int compile_job_run(void *argument) {
 		return result;
 	}
 
-	if (!command_write(job->command_path, job->command)) {
+	if (!command_write(
+		    job->command_path, job->command)) {
 		fprintf(stderr, "Failed to write compile state for %s\n",
 			job->source->relative_path);
 
 		job->result = -1;
 		return -1;
-	}
+	    }
 
 	job->result = 0;
 
@@ -670,7 +677,8 @@ ObjectList *compile_sources(const Manifest *manifest,
 			    const BuildTarget *target,
 			    const SourceList *sources,
 			    const char *project_root,
-			    const BuildProfile profile) {
+			    const BuildProfile profile,
+			    const int verbose) {
 	if (!manifest) {
 		fprintf(stderr, "compile_sources: manifest is NULL\n");
 
@@ -720,6 +728,7 @@ ObjectList *compile_sources(const Manifest *manifest,
 		job->source = &sources->files[i];
 		job->project_root = project_root;
 		job->profile = profile;
+		job->verbose = verbose;
 
 		job->object_path = object_path_from_source(
 			target, project_root, job->source, profile);
