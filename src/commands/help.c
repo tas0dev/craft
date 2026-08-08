@@ -17,10 +17,10 @@ void print_help(const int argc, char *argv[]) {
 	printf(BLUE "Usage:\n" RESET "\t" MAGENTA "craft" RESET
 		    " <command> [arguments]\n"
 		    "\n" BLUE "Commands:\n" RESET "\t" GREEN "build" RESET
-		    "\t[target]\tBuild the project or a target\n"
-		    "\t" GREEN "run" RESET
-		    "\t[target]\tBuild and run an executable target\n"
-		    "\t" GREEN "clean" RESET "\t\t\tRemove build artifacts\n"
+	       "\t[target] [--release]\tBuild the project or a target\n"
+	       "\t" GREEN "run" RESET
+		    "\t[target] [--release]\tBuild and run an executable target\n"
+	       "\t" GREEN "clean" RESET "\t\t\tRemove build artifacts\n"
 		    "\t" GREEN "targets" RESET "\t\t\tList project targets\n"
 		    "\t" GREEN "install" RESET
 		    "\t\t\tInstall Craft for the current user\n"
