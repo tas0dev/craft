@@ -45,10 +45,13 @@ hello/
 ### ビルド
 
 ```sh
-craft build
+craft build <target> <profile>
 ```
 
 成果物は`target/`以下に生成されます。
+
+`<target>`は何もない場合はすべてのターゲットがビルドされます。
+`<profile>`は`--release`または`--debug`を付与できます。
 
 中間生成物はターゲットごとに、
 
@@ -75,7 +78,7 @@ target/
 ### 実行
 
 ```sh
-craft run
+craft run <target> <profile>
 ```
 
 実行可能ターゲットをビルドしたあと、その成果物を実行します。 複数の実行可能ターゲットがある場合は、ターゲット名を指定できます。
