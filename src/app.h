@@ -9,7 +9,7 @@
 #ifndef CRAFT_APP_H
 #define CRAFT_APP_H
 
-#define VERSION "0.1"
+#define VERSION "0.01"
 #define AUTHOR "tas0dev"
 #define BUILD __DATE__
 
