@@ -17,7 +17,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifndef _WIN32
+#ifdef _WIN32
 #include <direct.h>
 #define getcwd _getcwd
 #else
