@@ -15,6 +15,8 @@
 #include "build/project.h"
 #include "build/source.h"
 #include "cli.h"
+#include "util/thread.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,10 +32,12 @@ static int parse_build_arguments(const int argc,
 				 char **argv,
 				 const char **target_name,
 				 BuildProfile *profile,
-				 int *verbose) {
+				 int *verbose,
+				 unsigned long long *jobs) {
 	*target_name = NULL;
 	*profile = Debug;
 	*verbose = 0;
+	*jobs = thread_cpu_count();
 
 	for (int i = 2; i < argc; i++) {
 		if (strcmp(argv[i], "--release") == 0) {
@@ -48,6 +52,48 @@ static int parse_build_arguments(const int argc,
 
 		if (strcmp(argv[i], "--verbose") == 0) {
 			*verbose = 1;
+			continue;
+		}
+
+		if (strcmp(argv[i], "-j") == 0 ||
+		    strcmp(argv[i], "--jobs") == 0) {
+			if (i + 1 >= argc) {
+				fprintf(stderr,
+					RED "Missing value for -j\n" RESET);
+
+				return 0;
+			}
+
+			char *end = NULL;
+			const unsigned long value =
+				strtoul(argv[++i], &end, 10);
+
+			if (*end != '\0' || value == 0) {
+				fprintf(stderr,
+					RED "Invalid job count: " RESET "%s\n",
+					argv[i]);
+
+				return 0;
+			}
+
+			*jobs = (size_t)value;
+			continue;
+		}
+
+		if (strncmp(argv[i], "-j", 2) == 0 && argv[i][2] != '\0') {
+			char *end = NULL;
+			const unsigned long value =
+				strtoul(argv[i] + 2, &end, 10);
+
+			if (*end != '\0' || value == 0) {
+				fprintf(stderr,
+					RED "Invalid job count: " RESET "%s\n",
+					argv[i] + 2);
+
+				return 0;
+			}
+
+			*jobs = (size_t)value;
 			continue;
 		}
 
@@ -75,7 +121,8 @@ static int build_target(const Manifest *manifest,
 			const BuildTarget *target,
 			const char *project_root,
 			const BuildProfile *profile,
-			const int verbose) {
+			const int verbose,
+			const unsigned long long jobs) {
 	SourceList *sources = source_collect(target, project_root);
 
 	if (!sources) {
@@ -87,8 +134,8 @@ static int build_target(const Manifest *manifest,
 	}
 
 	ObjectList *objects =
-		compile_sources(manifest, target, sources,
-					      project_root, *profile, verbose);
+		compile_sources(manifest, target, sources, project_root,
+				*profile, verbose, jobs);
 
 	if (!objects) {
 		fprintf(stderr,
@@ -122,7 +169,8 @@ static int build_target_recursive(const Manifest *manifest,
 				  const char *project_root,
 				  unsigned char *states,
 				  const BuildProfile *profile,
-				  const int verbose) {
+				  const int verbose,
+				  const unsigned long long jobs) {
 	const size_t target_index = (size_t)(target - manifest->targets);
 
 	if (states[target_index] == 2) return 0;
@@ -159,13 +207,14 @@ static int build_target_recursive(const Manifest *manifest,
 		if (build_target_recursive(manifest,
 				dependency,
 				project_root,
-				states, profile, verbose) != 0) {
+				states, profile, verbose,
+					   jobs) != 0) {
 			return 1;
 		}
 	}
 
-	if (build_target(manifest, target, project_root, profile,
-			verbose
+	if (build_target(manifest, target, project_root, profile, verbose,
+			 jobs
 		) != 0
 	) {
 		return 1;
@@ -189,13 +238,14 @@ int run_build(const int argc, char **argv) {
 	const char *target_name = NULL;
 	BuildProfile profile = Debug;
 	int verbose = 0;
+	unsigned long long jobs = 1;
 
 	if (!parse_build_arguments(
 		    argc,
 		    argv,
 		    &target_name,
-		    &profile,
-		    &verbose)) {
+		    &profile, &verbose,
+				   &jobs)) {
 		return 1;
 	}
 
@@ -261,8 +311,7 @@ int run_build(const int argc, char **argv) {
 			build_target_recursive(manifest, target, project_root,
 					       states,
 				&profile,
-				verbose
-			);
+				verbose, jobs);
 
 		free(states);
 		manifest_free(manifest);
@@ -279,9 +328,7 @@ int run_build(const int argc, char **argv) {
 				project_root,
 				states,
 				&profile,
-				verbose
-			) != 0
-		) {
+				verbose, jobs) != 0) {
 			free(states);
 			manifest_free(manifest);
 			free(project_root);

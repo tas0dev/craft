@@ -21,7 +21,8 @@ ObjectList *compile_sources(const Manifest *manifest,
 			    const SourceList *sources,
 			    const char *project_root,
 			    BuildProfile profile,
-			    int verbose);
+			    int verbose,
+			    unsigned long long job_amount);
 
 void object_list_free(ObjectList *objects);
 #endif // CRAFT_COMPILER_H

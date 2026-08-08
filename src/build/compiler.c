@@ -678,7 +678,8 @@ ObjectList *compile_sources(const Manifest *manifest,
 			    const SourceList *sources,
 			    const char *project_root,
 			    const BuildProfile profile,
-			    const int verbose) {
+			    const int verbose,
+			    const unsigned long long job_amount) {
 	if (!manifest) {
 		fprintf(stderr, "compile_sources: manifest is NULL\n");
 
@@ -793,7 +794,7 @@ ObjectList *compile_sources(const Manifest *manifest,
 		}
 	}
 
-	size_t maximum_threads = thread_cpu_count();
+	size_t maximum_threads = job_amount;
 
 	if (maximum_threads == 0) maximum_threads = 1;
 
