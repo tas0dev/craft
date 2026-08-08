@@ -10,9 +10,11 @@
 #define CRAFT_LINKER_H
 #include "compiler.h"
 #include "manifest.h"
+#include "profile.h"
 
 int link_objects(const Manifest *manifest,
 		 const BuildTarget *target,
 		 const ObjectList *objects,
-		 const char *project_root);
+		 const char *project_root,
+		 BuildProfile profile);
 #endif // CRAFT_LINKER_H

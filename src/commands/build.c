@@ -11,12 +11,14 @@
 #include "build/compiler.h"
 #include "build/linker.h"
 #include "build/manifest.h"
+#include "build/profile.h"
 #include "build/project.h"
 #include "build/source.h"
 #include "cli.h"
-
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
 #ifdef _WIN32
 #include <direct.h>
 #define getcwd _getcwd
@@ -24,9 +26,48 @@
 #include <unistd.h>
 #endif
 
+static int parse_build_arguments(const int argc,
+				 char **argv,
+				 const char **target_name,
+				 BuildProfile *profile) {
+	*target_name = NULL;
+	*profile = Debug;
+
+	for (int i = 2; i < argc; i++) {
+		if (strcmp(argv[i], "--release") == 0) {
+			*profile = Release;
+			continue;
+		}
+
+		if (strcmp(argv[i], "--debug") == 0) {
+			*profile = Debug;
+			continue;
+		}
+
+		if (argv[i][0] == '-') {
+			fprintf(stderr, RED "Unknown option: " RESET "%s\n",
+				argv[i]);
+
+			return 0;
+		}
+
+		if (*target_name) {
+			fprintf(stderr,
+				RED "Multiple targets specified\n" RESET);
+
+			return 0;
+		}
+
+		*target_name = argv[i];
+	}
+
+	return 1;
+}
+
 static int build_target(const Manifest *manifest,
 			const BuildTarget *target,
-			const char *project_root) {
+			const char *project_root,
+			const BuildProfile *profile) {
 	SourceList *sources = source_collect(target, project_root);
 
 	if (!sources) {
@@ -38,7 +79,8 @@ static int build_target(const Manifest *manifest,
 	}
 
 	ObjectList *objects =
-		compile_sources(manifest, target, sources, project_root);
+		compile_sources(manifest, target, sources,
+					      project_root, *profile);
 
 	if (!objects) {
 		fprintf(stderr, RED "Failed to compile target %s\n" RESET,
@@ -48,7 +90,7 @@ static int build_target(const Manifest *manifest,
 		return 1;
 	}
 
-	if (!link_objects(manifest, target, objects, project_root)) {
+	if (!link_objects(manifest, target, objects, project_root, *profile)) {
 		fprintf(stderr, RED "Failed to link target %s\n" RESET,
 			target->name);
 
@@ -67,7 +109,8 @@ static int build_target(const Manifest *manifest,
 static int build_target_recursive(const Manifest *manifest,
 				  const BuildTarget *target,
 				  const char *project_root,
-				  unsigned char *states) {
+				  unsigned char *states,
+				  const BuildProfile *profile) {
 	const size_t target_index = (size_t)(target - manifest->targets);
 
 	if (states[target_index] == 2) return 0;
@@ -97,12 +140,14 @@ static int build_target_recursive(const Manifest *manifest,
 		}
 
 		if (build_target_recursive(manifest, dependency, project_root,
-					   states) != 0) {
+					   states, profile) != 0) {
 			return 1;
 		}
 	}
 
-	if (build_target(manifest, target, project_root) != 0) { return 1; }
+	if (build_target(manifest, target, project_root, profile) != 0) {
+		return 1;
+	}
 
 	states[target_index] = 2;
 
@@ -118,6 +163,13 @@ int run_build(const int argc, char **argv) {
 		return 1;
 	}
 
+	const char *target_name = NULL;
+	BuildProfile profile = Debug;
+
+	if (!parse_build_arguments(argc, argv, &target_name, &profile)) {
+		return 1;
+	}
+
 	char *project_root = project_find_root(cwd);
 
 	if (!project_root) {
@@ -128,15 +180,19 @@ int run_build(const int argc, char **argv) {
 
 	ManifestError error = {0};
 
-	Manifest *manifest = manifest_load(project_root, &error);
+	Manifest *manifest =
+		manifest_load(project_root, &error);
 
 	if (!manifest) {
 		fprintf(stderr, RED "Failed to load manifest" RESET);
 
-		if (error.message) fprintf(stderr, ": %s", error.message);
+		if (error.message)
+			fprintf(stderr, ": %s", error.message);
 
 		if (error.line != 0) {
-			fprintf(stderr, " (%zu:%zu)", error.line, error.column);
+			fprintf(stderr,
+				" (%zu:%zu)",
+				error.line, error.column);
 		}
 
 		fputc('\n', stderr);
@@ -146,7 +202,9 @@ int run_build(const int argc, char **argv) {
 	}
 
 	unsigned char *states =
-		calloc(manifest->target_count, sizeof(unsigned char));
+		calloc(
+			manifest->target_count,
+			sizeof(unsigned char));
 
 	if (!states) {
 		fprintf(stderr, RED "Failed to allocate build state\n" RESET);
@@ -157,12 +215,14 @@ int run_build(const int argc, char **argv) {
 		return 1;
 	}
 
-	if (argc >= 3) {
-		BuildTarget *target = manifest_find_target(manifest, argv[2]);
+	if (target_name) {
+		BuildTarget *target =
+			manifest_find_target(manifest, target_name);
 
 		if (!target) {
 			fprintf(stderr, RED "Unknown target: " RESET "%s\n",
-				argv[2]);
+				target_name
+			);
 
 			free(states);
 			manifest_free(manifest);
@@ -171,8 +231,11 @@ int run_build(const int argc, char **argv) {
 			return 1;
 		}
 
-		const int result = build_target_recursive(manifest, target,
-							  project_root, states);
+		const int result =
+			build_target_recursive(
+				manifest,
+				target,
+				project_root, states, &profile);
 
 		free(states);
 		manifest_free(manifest);
@@ -181,9 +244,16 @@ int run_build(const int argc, char **argv) {
 		return result;
 	}
 
-	for (size_t i = 0; i < manifest->target_count; i++) {
-		if (build_target_recursive(manifest, &manifest->targets[i],
-					   project_root, states) != 0) {
+	for (
+		size_t i = 0;
+		i < manifest->target_count;
+		i++
+	) {
+		if (
+			build_target_recursive(
+				manifest, &manifest->targets[i],
+					   project_root, states,
+					   &profile) != 0) {
 			free(states);
 			manifest_free(manifest);
 			free(project_root);

@@ -8,6 +8,7 @@
 
 #ifndef CRAFT_COMPILER_H
 #define CRAFT_COMPILER_H
+#include "profile.h"
 #include "source.h"
 
 typedef struct {
@@ -18,7 +19,8 @@ typedef struct {
 ObjectList *compile_sources(const Manifest *manifest,
 			    const BuildTarget *target,
 			    const SourceList *sources,
-			    const char *project_root);
+			    const char *project_root,
+			    BuildProfile profile);
 
 void object_list_free(ObjectList *objects);
 #endif // CRAFT_COMPILER_H

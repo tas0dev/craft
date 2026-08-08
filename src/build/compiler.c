@@ -8,6 +8,7 @@
 
 #include "build/compiler.h"
 #include "cli.h"
+#include "profile.h"
 #include "util/process.h"
 #include "util/thread.h"
 #include <stdio.h>
@@ -37,6 +38,7 @@ typedef struct {
 	char *command;
 	int needs_compile;
 	int result;
+	BuildProfile profile;
 } CompileJob;
 
 static char *path_join(const char *left, const char *right) {
@@ -195,8 +197,32 @@ static int create_parent_directories(const char *path) {
 
 static char *object_path_from_source(const BuildTarget *target,
 				     const char *project_root,
-				     const SourceFile *source) {
-	char *build_root = path_join(project_root, "target/build");
+				     const SourceFile *source,
+				     const BuildProfile profile) {
+	char *target_root = path_join(project_root, "target");
+
+	if (!target_root) {
+		fprintf(stderr, "Failed to create target root for %s\n",
+			source->relative_path);
+
+		return NULL;
+	}
+
+	char *profile_root =
+		path_join(target_root, build_profile_name(profile));
+
+	free(target_root);
+
+	if (!profile_root) {
+		fprintf(stderr, "Failed to create profile root for %s\n",
+			source->relative_path);
+
+		return NULL;
+	}
+
+	char *build_root = path_join(profile_root, "build");
+
+	free(profile_root);
 
 	if (!build_root) {
 		fprintf(stderr, "Failed to create build root for %s\n",
@@ -227,10 +253,7 @@ static char *object_path_from_source(const BuildTarget *target,
 		return NULL;
 	}
 
-	strcpy(
-		relative,
-		source->relative_path
-	);
+	strcpy(relative, source->relative_path);
 
 	char *extension = strrchr(relative, '.');
 
@@ -285,16 +308,30 @@ static char *build_compile_command(const Manifest *manifest,
 				   const SourceFile *source,
 				   const char *object_path,
 				   const char *dependency_path,
-				   const char *project_root) {
+				   const char *project_root,
+				   const BuildProfile profile) {
 	IncludeList includes = {0};
 
 	if (!collect_target_includes(manifest, target, project_root,
 				     &includes)) {
 		include_list_free(&includes);
 		return NULL;
-	}
+				     }
 
-	size_t length = strlen(manifest->cc);
+	const char *optimization =
+					     build_profile_optimization(
+						     profile);
+
+				     size_t length = strlen(manifest->cc);
+
+	length += 1;
+	length += strlen(optimization);
+
+	if (profile == Debug) {
+		length += strlen(" -g");
+	} else {
+		length += strlen(" -DNDEBUG");
+	}
 
 	for (size_t i = 0; i < includes.count; i++) {
 		length += strlen(" -I");
@@ -328,6 +365,14 @@ static char *build_compile_command(const Manifest *manifest,
 	command[0] = '\0';
 
 	strcat(command, manifest->cc);
+
+	strcat(command, " ");
+	strcat(command, optimization);
+
+	if (profile == Debug)
+		strcat(command, " -g");
+	else
+		strcat(command, " -DNDEBUG");
 
 	for (size_t i = 0; i < includes.count; i++) {
 		strcat(command, " -I");
@@ -453,7 +498,8 @@ static int compile_source(const Manifest *manifest,
 			  const SourceFile *source,
 			  const char *object_path,
 			  const char *dependency_path,
-			  const char *project_root) {
+			  const char *project_root,
+			  const BuildProfile profile) {
 	IncludeList includes = {0};
 
 	if (!collect_target_includes(manifest, target, project_root,
@@ -462,8 +508,11 @@ static int compile_source(const Manifest *manifest,
 		return -1;
 	}
 
-	const size_t argument_count =
-		1 + includes.count * 2 + target->cflags_count + 8 + 1;
+	const size_t profile_argument_count = 2;
+
+	const size_t argument_count = 1 + profile_argument_count +
+				      includes.count * 2 +
+				      target->cflags_count + 7 + 1;
 
 	const char **argv = calloc(argument_count, sizeof(char *));
 
@@ -480,14 +529,20 @@ static int compile_source(const Manifest *manifest,
 
 	argv[argument_index++] = manifest->cc;
 
+	argv[argument_index++] = build_profile_optimization(profile);
+
+	if (profile == Debug)
+		argv[argument_index++] = "-g";
+	else
+		argv[argument_index++] = "-DNDEBUG";
+
 	for (size_t i = 0; i < includes.count; i++) {
 		argv[argument_index++] = "-I";
 		argv[argument_index++] = includes.items[i];
 	}
 
-	for (size_t i = 0; i < target->cflags_count; i++) {
+	for (size_t i = 0; i < target->cflags_count; i++)
 		argv[argument_index++] = target->cflags[i];
-	}
 
 	argv[argument_index++] = "-MMD";
 	argv[argument_index++] = "-MF";
@@ -512,11 +567,11 @@ static int compile_source(const Manifest *manifest,
 }
 
 static int compile_job_run(void *argument) {
-	CompileJob *job = (CompileJob *)argument;
+	CompileJob *job = argument;
 
 	const int result = compile_source(
 		job->manifest, job->target, job->source, job->object_path,
-		job->dependency_path, job->project_root);
+		job->dependency_path, job->project_root, job->profile);
 
 	if (result != 0) {
 		job->result = result;
@@ -614,7 +669,8 @@ static int should_compile(const char *object_path,
 ObjectList *compile_sources(const Manifest *manifest,
 			    const BuildTarget *target,
 			    const SourceList *sources,
-			    const char *project_root) {
+			    const char *project_root,
+			    const BuildProfile profile) {
 	if (!manifest) {
 		fprintf(stderr, "compile_sources: manifest is NULL\n");
 
@@ -663,9 +719,10 @@ ObjectList *compile_sources(const Manifest *manifest,
 		job->target = target;
 		job->source = &sources->files[i];
 		job->project_root = project_root;
+		job->profile = profile;
 
-		job->object_path = object_path_from_source(target, project_root,
-							   job->source);
+		job->object_path = object_path_from_source(
+			target, project_root, job->source, profile);
 
 		if (!job->object_path) {
 			fprintf(stderr, "Failed to create object path for %s\n",
@@ -697,7 +754,7 @@ ObjectList *compile_sources(const Manifest *manifest,
 
 		job->command = build_compile_command(
 			manifest, target, job->source, job->object_path,
-			job->dependency_path, project_root);
+			job->dependency_path, project_root, profile);
 
 		if (!job->command) {
 			fprintf(stderr,
@@ -758,9 +815,8 @@ ObjectList *compile_sources(const Manifest *manifest,
 			fprintf(stderr, "Failed to start compile job for %s\n",
 				job->source->relative_path);
 
-			for (size_t j = 0; j < active_count; j++) {
+			for (size_t j = 0; j < active_count; j++)
 				thread_join(threads[j]);
-			}
 
 			free(active_jobs);
 			free(threads);
@@ -769,7 +825,6 @@ ObjectList *compile_sources(const Manifest *manifest,
 		}
 
 		threads[active_count] = thread;
-
 		active_jobs[active_count] = job;
 
 		active_count++;
@@ -780,8 +835,8 @@ ObjectList *compile_sources(const Manifest *manifest,
 
 				if (result != 0) {
 					fprintf(stderr,
-						"Failed to compile %s (exit "
-						"code %d)\n",
+						"Failed to compile %s "
+						"(exit code %d)\n",
 						active_jobs[j]
 							->source->relative_path,
 						result);
@@ -801,7 +856,9 @@ ObjectList *compile_sources(const Manifest *manifest,
 		const int result = thread_join(threads[i]);
 
 		if (result != 0) {
-			fprintf(stderr, "Failed to compile %s (exit code %d)\n",
+			fprintf(stderr,
+				"Failed to compile %s "
+				"(exit code %d)\n",
 				active_jobs[i]->source->relative_path, result);
 
 			free(active_jobs);
@@ -814,18 +871,16 @@ ObjectList *compile_sources(const Manifest *manifest,
 	free(active_jobs);
 	free(threads);
 
-	for (size_t i = 0; i < sources->count; i++) {
+	for (size_t i = 0; i < sources->count; i++)
 		compile_job_free(&jobs[i]);
-	}
 
 	free(jobs);
 
 	return objects;
 
 error:
-	for (size_t i = 0; i < sources->count; i++) {
+	for (size_t i = 0; i < sources->count; i++)
 		compile_job_free(&jobs[i]);
-	}
 
 	free(jobs);
 	object_list_free(objects);

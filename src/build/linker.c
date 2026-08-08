@@ -7,7 +7,7 @@
  */
 
 #include "linker.h"
-
+#include "build/profile.h"
 #include "cli.h"
 #include "util/process.h"
 #include <errno.h>
@@ -48,16 +48,32 @@ static int create_directory(const char *path) {
 }
 
 static char *artifact_path(const BuildTarget *target,
-			   const char *project_root) {
-	char *target_path = path_join(project_root, "target");
+			   const char *project_root,
+			   const BuildProfile profile) {
+	char *target_root = path_join(project_root, "target");
 
-	if (!target_path) return NULL;
+	if (!target_root) return NULL;
 
-	if (!create_directory(target_path)) {
+	if (!create_directory(target_root)) {
 		fprintf(stderr, "Failed to create target directory: %s\n",
-			target_path);
+			target_root);
 
-		free(target_path);
+		free(target_root);
+		return NULL;
+	}
+
+	char *profile_root =
+		path_join(target_root, build_profile_name(profile));
+
+	free(target_root);
+
+	if (!profile_root) return NULL;
+
+	if (!create_directory(profile_root)) {
+		fprintf(stderr, "Failed to create profile directory: %s\n",
+			profile_root);
+
+		free(profile_root);
 		return NULL;
 	}
 
@@ -92,7 +108,8 @@ static char *artifact_path(const BuildTarget *target,
 			snprintf(artifact_name, length, "lib%s.a",
 				 target->name);
 		}
-	} break;
+		break;
+	}
 
 	case DynamicLibrary:
 #ifdef _WIN32
@@ -124,14 +141,14 @@ static char *artifact_path(const BuildTarget *target,
 	if (!artifact_name) {
 		fprintf(stderr, "Failed to allocate artifact name\n");
 
-		free(target_path);
+		free(profile_root);
 		return NULL;
 	}
 
-	char *path = path_join(target_path, artifact_name);
+	char *path = path_join(profile_root, artifact_name);
 
 	free(artifact_name);
-	free(target_path);
+	free(profile_root);
 
 	return path;
 }
@@ -156,7 +173,8 @@ static char *build_link_command(const Manifest *manifest,
 				const BuildTarget *target,
 				const ObjectList *objects,
 				const char *artifact,
-				const char *project_root) {
+				const char *project_root,
+				const BuildProfile profile) {
 	const char *program =
 		target->target_type == StaticLibrary ? "ar" : manifest->ld;
 
@@ -183,7 +201,43 @@ static char *build_link_command(const Manifest *manifest,
 	}
 
 	for (size_t i = 0; i < objects->count; i++) {
-		length += 1 + strlen(objects->files[i]);
+		length += 1;
+		length += strlen(objects->files[i]);
+	}
+
+	char **dependency_paths = NULL;
+
+	if (target->target_type != StaticLibrary &&
+	    target->dependency_count != 0) {
+		dependency_paths =
+			calloc(target->dependency_count, sizeof(char *));
+
+		if (!dependency_paths) {
+			fprintf(stderr,
+				"Failed to allocate dependency paths\n");
+
+			return NULL;
+		}
+
+		for (size_t i = 0; i < target->dependency_count; i++) {
+			BuildTarget *dependency = manifest_find_target(
+				manifest, target->dependencies[i]);
+
+			if (!dependency) {
+				fprintf(stderr, "Unknown dependency: %s\n",
+					target->dependencies[i]);
+
+				goto error;
+			}
+
+			dependency_paths[i] = artifact_path(
+				dependency, project_root, profile);
+
+			if (!dependency_paths[i]) goto error;
+
+			length += 1;
+			length += strlen(dependency_paths[i]);
+		}
 	}
 
 	if (target->target_type != StaticLibrary) {
@@ -196,7 +250,7 @@ static char *build_link_command(const Manifest *manifest,
 	if (!command) {
 		fprintf(stderr, "Failed to allocate linker command\n");
 
-		return NULL;
+		goto error;
 	}
 
 	command[0] = '\0';
@@ -216,6 +270,11 @@ static char *build_link_command(const Manifest *manifest,
 	}
 
 	if (target->target_type != StaticLibrary) {
+		for (size_t i = 0; i < target->dependency_count; i++) {
+			strcat(command, " ");
+			strcat(command, dependency_paths[i]);
+		}
+
 		for (size_t i = 0; i < target->ldflags_count; i++) {
 			strcat(command, " ");
 			strcat(command, target->ldflags[i]);
@@ -232,7 +291,24 @@ static char *build_link_command(const Manifest *manifest,
 		strcat(command, artifact);
 	}
 
+	for (size_t i = 0; i < target->dependency_count; i++) {
+		free(dependency_paths ? dependency_paths[i] : NULL);
+	}
+
+	free(dependency_paths);
+
 	return command;
+
+error:
+	if (dependency_paths) {
+		for (size_t i = 0; i < target->dependency_count; i++) {
+			free(dependency_paths[i]);
+		}
+	}
+
+	free(dependency_paths);
+
+	return NULL;
 }
 
 static int command_matches(const char *command_path, const char *command) {
@@ -312,15 +388,19 @@ static int command_write(const char *command_path, const char *command) {
 	return 1;
 }
 
-static int should_link(const ObjectList *objects,
+static int should_link(const Manifest *manifest,
+		       const BuildTarget *target,
+		       const ObjectList *objects,
 		       const char *artifact,
 		       const char *command_path,
-		       const char *command) {
+		       const char *command,
+		       const char *project_root,
+		       const BuildProfile profile) {
 	struct stat artifact_stat;
 
 	if (stat(artifact, &artifact_stat) != 0) return 1;
 
-	if (!command_matches(command_path, command)) { return 1; }
+	if (!command_matches(command_path, command)) return 1;
 
 	for (size_t i = 0; i < objects->count; i++) {
 		struct stat object_stat;
@@ -330,6 +410,33 @@ static int should_link(const ObjectList *objects,
 		if (object_stat.st_mtime > artifact_stat.st_mtime) { return 1; }
 	}
 
+	if (target->target_type == StaticLibrary) return 0;
+
+	for (size_t i = 0; i < target->dependency_count; i++) {
+		BuildTarget *dependency =
+			manifest_find_target(manifest, target->dependencies[i]);
+
+		if (!dependency) return 1;
+
+		char *dependency_path =
+			artifact_path(dependency, project_root, profile);
+
+		if (!dependency_path) return 1;
+
+		struct stat dependency_stat;
+
+		if (stat(dependency_path, &dependency_stat) != 0) {
+			free(dependency_path);
+			return 1;
+		}
+
+		free(dependency_path);
+
+		if (dependency_stat.st_mtime > artifact_stat.st_mtime) {
+			return 1;
+		}
+	}
+
 	return 0;
 }
 
@@ -337,7 +444,8 @@ static int link_artifact(const Manifest *manifest,
 			 const BuildTarget *target,
 			 const ObjectList *objects,
 			 const char *artifact,
-			 const char *project_root) {
+			 const char *project_root,
+			 const BuildProfile profile) {
 	if (target->target_type == StaticLibrary) {
 		const size_t argument_count = 3 + objects->count + 1;
 
@@ -389,7 +497,8 @@ static int link_artifact(const Manifest *manifest,
 			goto error;
 		}
 
-		dependency_paths[i] = artifact_path(dependency, project_root);
+		dependency_paths[i] =
+			artifact_path(dependency, project_root, profile);
 
 		if (!dependency_paths[i]) goto error;
 	}
@@ -429,7 +538,9 @@ static int link_artifact(const Manifest *manifest,
 
 	argv[index++] = manifest->ld;
 
-	if (target->target_type == DynamicLibrary) argv[index++] = "-shared";
+	if (target->target_type == DynamicLibrary) {
+		argv[index++] = "-shared";
+	}
 
 	for (size_t i = 0; i < objects->count; i++) {
 		argv[index++] = objects->files[i];
@@ -478,7 +589,8 @@ error:
 int link_objects(const Manifest *manifest,
 		 const BuildTarget *target,
 		 const ObjectList *objects,
-		 const char *project_root) {
+		 const char *project_root,
+		 const BuildProfile profile) {
 	if (!manifest) {
 		fprintf(stderr, "link_objects: manifest is NULL\n");
 
@@ -510,7 +622,7 @@ int link_objects(const Manifest *manifest,
 		return 0;
 	}
 
-	char *artifact = artifact_path(target, project_root);
+	char *artifact = artifact_path(target, project_root, profile);
 
 	if (!artifact) return 0;
 
@@ -522,19 +634,22 @@ int link_objects(const Manifest *manifest,
 	}
 
 	char *command = build_link_command(manifest, target, objects, artifact,
-					   project_root);
+					   project_root, profile);
 
 	if (!command) {
 		free(command_path);
 		free(artifact);
+
 		return 0;
 	}
 
-	if (should_link(objects, artifact, command_path, command)) {
+	if (should_link(manifest, target, objects, artifact, command_path,
+			command, project_root, profile)) {
 		printf(BLUE "Linking\t\t\t" RESET "%s\n", target->name);
 
-		const int result = link_artifact(manifest, target, objects,
-						 artifact, project_root);
+		const int result =
+			link_artifact(manifest, target, objects, artifact,
+				      project_root, profile);
 
 		if (result != 0) {
 			fprintf(stderr, "Failed to link %s (exit code %d)\n",
