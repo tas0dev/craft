@@ -8,15 +8,12 @@
 
 #include "build.h"
 #include "app.h"
-#include "build/compiler.h"
-#include "build/linker.h"
+#include "build/builder.h"
 #include "build/manifest.h"
 #include "build/profile.h"
 #include "build/project.h"
-#include "build/source.h"
 #include "cli.h"
 #include "util/thread.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,113 +114,7 @@ static int parse_build_arguments(const int argc,
 	return 1;
 }
 
-static int build_target(const Manifest *manifest,
-			const BuildTarget *target,
-			const char *project_root,
-			const BuildProfile *profile,
-			const int verbose,
-			const unsigned long long jobs) {
-	SourceList *sources = source_collect(target, project_root);
 
-	if (!sources) {
-		fprintf(stderr,
-			RED "Failed to collect sources for target %s\n" RESET,
-			target->name);
-
-		return 1;
-	}
-
-	ObjectList *objects =
-		compile_sources(manifest, target, sources, project_root,
-				*profile, verbose, jobs);
-
-	if (!objects) {
-		fprintf(stderr,
-			RED "Failed to compile target %s\n" RESET,
-			target->name);
-
-		source_list_free(sources);
-		return 1;
-	}
-
-	if (!link_objects(
-		    manifest, target, objects, project_root, *profile,
-			  verbose)) {
-		fprintf(stderr, RED "Failed to link target %s\n" RESET,
-			target->name);
-
-		object_list_free(objects);
-		source_list_free(sources);
-
-		return 1;
-	    }
-
-	object_list_free(objects);
-	source_list_free(sources);
-
-	return 0;
-}
-
-static int build_target_recursive(const Manifest *manifest,
-				  const BuildTarget *target,
-				  const char *project_root,
-				  unsigned char *states,
-				  const BuildProfile *profile,
-				  const int verbose,
-				  const unsigned long long jobs) {
-	const size_t target_index = (size_t)(target - manifest->targets);
-
-	if (states[target_index] == 2) return 0;
-
-	if (states[target_index] == 1) {
-		fprintf(stderr,
-			RED "Circular dependency involving target: " RESET
-			    "%s\n",
-			target->name);
-
-		return 1;
-	}
-
-	states[target_index] = 1;
-
-	for (
-		size_t i = 0;
-		i < target->dependency_count;
-		i++
-	) {
-		const char *dependency_name = target->dependencies[i];
-
-		BuildTarget *dependency =
-			manifest_find_target(manifest, dependency_name
-			);
-
-		if (!dependency) {
-			fprintf(stderr, RED "Unknown dependency: " RESET "%s\n",
-				dependency_name);
-
-			return 1;
-		}
-
-		if (build_target_recursive(manifest,
-				dependency,
-				project_root,
-				states, profile, verbose,
-					   jobs) != 0) {
-			return 1;
-		}
-	}
-
-	if (build_target(manifest, target, project_root, profile, verbose,
-			 jobs
-		) != 0
-	) {
-		return 1;
-	}
-
-	states[target_index] = 2;
-
-	return 0;
-}
 
 int run_build(const int argc, char **argv) {
 	char cwd[4096];
