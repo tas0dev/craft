@@ -23,6 +23,7 @@ enum Commands {
 	Run,
 	Targets,
 	Install,
+	Test,
 	UnknownCommand,
 };
 

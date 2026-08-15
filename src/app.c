@@ -21,5 +21,6 @@ enum Commands match_commands(const char *command) {
 	if (strcmp(command, "run") == 0) return Run;
 	if (strcmp(command, "targets") == 0) return Targets;
 	if (strcmp(command, "install") == 0) return Install;
+	if (strcmp(command, "test") == 0) return Test;
 	return UnknownCommand;
 }

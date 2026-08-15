@@ -7,15 +7,15 @@
  */
 
 #include "app.h"
-#include "cli.h"
 #include "commands/build.h"
 #include "commands/clean.h"
 #include "commands/help.h"
 #include "commands/install.h"
 #include "commands/run.h"
 #include "commands/targets.h"
+#include "commands/test.h"
+#include "commands/unknown.h"
 #include "commands/version.h"
-#include <stdio.h>
 
 int main(const int argc, char **argv) {
 	if (argc == 1) {
@@ -33,10 +33,8 @@ int main(const int argc, char **argv) {
 	case Run: run_run(argc, argv); break;
 	case Targets: run_targets(argc, argv); break;
 	case Install: run_install(argc, argv); break;
-	default:
-		printf(RED "Unknown command: " RESET "%s\n", argv[1]);
-		return 1;
+	case Test: run_tests(argc, argv); break;
+	case UnknownCommand: print_unknown(argc, argv); break;
 	}
-
 	return 0;
 }
