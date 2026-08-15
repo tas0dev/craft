@@ -10,6 +10,7 @@
 #define CRAFT_TEST_H
 
 typedef struct TestSources TestSources;
+typedef struct TestSource TestSource;
 
 int run_tests(int argc, char **argv);
 
